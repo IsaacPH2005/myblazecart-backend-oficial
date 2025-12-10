@@ -1,0 +1,389 @@
+<?php
+
+use App\Http\Controllers\api\auth\AuthController;
+use App\Http\Controllers\api\BusinessController;
+use App\Http\Controllers\api\CategoryController;
+use App\Http\Controllers\api\Driver\DriverController;
+use App\Http\Controllers\api\Driver\DriverDocumentController;
+use App\Http\Controllers\api\MovementBox\MovementBoxController;
+use App\Http\Controllers\api\OperatingBox\OperatingBoxController;
+use App\Http\Controllers\api\OperatingBox\OperatingBoxHistoryController;
+use App\Http\Controllers\api\PaymentMethodController;
+use App\Http\Controllers\api\PendingPaymentsController;
+use App\Http\Controllers\api\RolesAndPermissions\RoleController;
+use App\Http\Controllers\api\TransactionFinancial\DashboardFinancial\DatosRelevantesController;
+use App\Http\Controllers\api\TransactionFinancial\DashboardFinancial\EgresosPorCategoriaController;
+use App\Http\Controllers\api\TransactionFinancial\DashboardFinancial\EstadoDeResultadosController;
+use App\Http\Controllers\api\TransactionFinancial\DashboardFinancial\IngresosPorCategoriaController;
+use App\Http\Controllers\api\TransactionFinancial\DashboardFinancial\IngresosPorNegocioController;
+use App\Http\Controllers\api\TransactionFinancial\DashboardFinancial\NegocioConMayorEgresosController;
+use App\Http\Controllers\api\TransactionFinancial\DashboardFinancial\RendicionCajaOperativasController;
+use App\Http\Controllers\api\TransactionFinancial\DashboardFinancial\VehiculosDelNegocioController;
+use App\Http\Controllers\api\TransactionFinancial\DriverFinancialTransactionController;
+use App\Http\Controllers\api\TransactionFinancial\FinancialReportController;
+use App\Http\Controllers\api\TransactionFinancial\FinancialStatementController;
+use App\Http\Controllers\api\TransactionFinancial\FinancialTransactionController;
+use App\Http\Controllers\api\TransactionFinancial\ImportExcelController;
+use App\Http\Controllers\api\TransactionStateController;
+use App\Http\Controllers\api\Users\ProfileController;
+use App\Http\Controllers\api\Users\UserController;
+use App\Http\Controllers\api\Vehicles\VehicleController;
+use App\Http\Controllers\api\Vehicles\VehicleDocumentController;
+use App\Http\Controllers\api\Vehicles\VehicleMaintenanceController;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
+
+/*
+|--------------------------------------------------------------------------
+| API Routes
+|--------------------------------------------------------------------------
+|
+*/
+
+/*
+|--------------------------------------------------------------------------
+| Rutas de Autenticación (Públicas)
+|--------------------------------------------------------------------------
+|
+*/
+
+Route::prefix('auth')->group(function () {
+    Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Rutas Protegidas (Requieren Autenticación Sanctum)
+|--------------------------------------------------------------------------
+|
+*/
+Route::middleware('auth:sanctum')->group(function () {
+
+    // Rutas de perfil de usuario (requieren autenticación)
+    // Rutas de perfil
+    Route::prefix('profile')->group(function () {
+        Route::get('/', [ProfileController::class, 'show']);
+        Route::get('/form-data', [ProfileController::class, 'getProfileFormData']);
+        Route::put('/', [ProfileController::class, 'update']);
+        Route::post('/change-password', [ProfileController::class, 'changePassword']);
+    });
+
+    /*
+    |--------------------------------------------------------------------------
+    | Rutas de Administrador
+    |--------------------------------------------------------------------------
+    | Solo accesibles por usuarios con rol de admin
+    |
+    */
+    Route::middleware(['admin'])->group(function () {
+        Route::prefix('users')->group(function () {
+            // Ruta para obtener usuarios que no son conductores
+            Route::get('/not-drivers', [DriverController::class, 'getUsersNotDrivers']);
+            Route::get('/', [UserController::class, 'index']);
+            Route::post('/', [UserController::class, 'store']);
+            Route::get('/actives', [UserController::class, 'getActiveUsers']);
+            Route::get('/{id}/complete', [UserController::class, 'getCompleteUserData']);
+            Route::put('/{id}/password', [UserController::class, 'updatePassword']);
+            Route::get('/{id}', [UserController::class, 'show']);
+            Route::put('/{id}', [UserController::class, 'update']);
+            Route::delete('/{id}', [UserController::class, 'destroy']);
+            Route::get('/{id}/with-password', [UserController::class, 'getUser WithPassword']);
+        });
+        // Rutas para roles
+        Route::prefix('roles')->group(function () {
+            Route::get('/', [RoleController::class, 'index']);
+            Route::get('/with-permissions', [RoleController::class, 'rolesWithPermissions']);
+            Route::get('/names', [RoleController::class, 'roleNames']);
+            Route::get('/stats', [RoleController::class, 'stats']);
+            Route::get('/{id}', [RoleController::class, 'show']);
+            Route::get('/{id}/permissions', [RoleController::class, 'showWithPermissions']);
+        });
+
+        Route::prefix('permissions')->controller(RoleController::class)->group(function () {
+            Route::get('/', 'permissions');
+        });
+
+        Route::prefix('drivers')->group(function () {
+            Route::get('/state-actives', [DriverController::class, 'getSimpleActiveDrivers']);
+            Route::get('/', [DriverController::class, 'index']);
+            Route::get('/{id}/info', [DriverController::class, 'getDriverInfo']);
+            Route::get('/{id}', [DriverController::class, 'show']);
+            Route::post('/', [DriverController::class, 'store']);
+            Route::post('/with-user', [DriverController::class, 'createUserWithDriver']);
+            Route::put('/{id}', [DriverController::class, 'update']);
+            Route::delete('/{id}', [DriverController::class, 'destroy']);
+            /* Route::get('/drivers-actives', 'getActiveDriversBasic'); */
+            Route::post('/{id}/activate', [DriverController::class, 'activate']);
+            Route::post('/{id}/desactivate', [DriverController::class, 'desactivate']);
+        });
+
+        Route::prefix('driver-documents')->group(function () {
+            Route::get('/', [DriverDocumentController::class, 'index']);
+            Route::post('/', [DriverDocumentController::class, 'store']);
+            Route::get('/tipos', [DriverDocumentController::class, 'getTipos']);
+            Route::put('/{id}/approve', [DriverDocumentController::class, 'approve']);
+            Route::put('/{id}/reject', [DriverDocumentController::class, 'reject']);
+            Route::get('/{driverId}', [DriverDocumentController::class, 'show']);
+            Route::put('/{id}', [DriverDocumentController::class, 'update']);
+            Route::delete('/{id}', [DriverDocumentController::class, 'destroy']);
+            Route::get('/{id}/download', [DriverDocumentController::class, 'download']);
+        });
+
+        Route::prefix('vehicles')->group(function () {
+            // Para API
+            Route::get('/estado-activos', [VehicleController::class, 'obtenerVehiculosActivos']);
+            Route::get('/', [VehicleController::class, 'index']);
+            Route::get('/active', [VehicleController::class, 'getActiveVehicles']);
+            Route::get('/active/simple', [VehicleController::class, 'getSimpleActiveVehicles']);
+            Route::get('/{id}', [VehicleController::class, 'show']);
+            Route::post('/', [VehicleController::class, 'store']);
+            Route::post('/create-user', [VehicleController::class, 'createUserWithVehicle']);
+            Route::put('/{id}', [VehicleController::class, 'update']);
+            Route::delete('/{id}', [VehicleController::class, 'destroy']);
+            Route::post('/{id}/activate', [VehicleController::class, 'activate']);
+            Route::post('/{id}/desactivate', [VehicleController::class, 'desactivate']);
+        });
+
+        Route::prefix('vehicle-documents')->group(function () {
+            Route::get('/', [VehicleDocumentController::class, 'index']);
+            Route::get('/{id}', [VehicleDocumentController::class, 'show']); // Mostrar un documento específico
+            /*  Route::get('/vehicle/{vehicleId}', [VehicleDocumentController::class, 'showByVehicle']); // Mostrar documentos de un vehículo */
+            Route::post('/', [VehicleDocumentController::class, 'store']);
+            Route::put('/{id}', [VehicleDocumentController::class, 'update']);
+            Route::delete('/{id}', [VehicleDocumentController::class, 'destroy']);
+            Route::get('/download/{id}', [VehicleDocumentController::class, 'download']);
+        });
+
+        // Rutas para mantenimientos de vehículos
+        Route::prefix('vehicle-maintenances')->group(function () {
+            // Obtener todos los mantenimientos
+            Route::get('/', [VehicleMaintenanceController::class, 'index']);
+
+            // Obtener mantenimientos activos (pendientes o atrasados)
+            Route::get('/active', [VehicleMaintenanceController::class, 'getActiveMaintenances']);
+
+            // Obtener mantenimientos de un vehículo específico
+            Route::get('/vehicle/{vehicleId}', [VehicleMaintenanceController::class, 'show']);
+
+            // Crear un nuevo mantenimiento
+            Route::post('/', [VehicleMaintenanceController::class, 'store']);
+
+            // Actualizar un mantenimiento existente
+            Route::put('/{id}', [VehicleMaintenanceController::class, 'update']);
+
+            // Eliminar un mantenimiento
+            Route::delete('/{id}', [VehicleMaintenanceController::class, 'destroy']);
+
+            // Descargar documento de mantenimiento
+            Route::get('/download/{id}', [VehicleMaintenanceController::class, 'download']);
+        });
+        // Rutas para estados de transacción
+        Route::prefix('transaction-states-admin')->group(function () {
+            Route::get('/', [TransactionStateController::class, 'index']);
+            /*   Route::get('/actives', [TransactionStateController::class, 'actives']); */
+            Route::get('/{id}', [TransactionStateController::class, 'show']);
+            Route::post('/', [TransactionStateController::class, 'store']);
+            Route::put('/{id}', [TransactionStateController::class, 'update']);
+            Route::delete('/{id}', [TransactionStateController::class, 'destroy']);
+            Route::put('/{id}/activate', [TransactionStateController::class, 'activate']);
+            Route::put('/{id}/deactivate', [TransactionStateController::class, 'deactivate']);
+        });
+        Route::get('/transaction-financial', [FinancialTransactionController::class, 'index']);
+        Route::post('/transaction-financial/admin', [FinancialTransactionController::class, 'store']);
+        Route::get('/transactions/export', [FinancialTransactionController::class, 'export']);
+        Route::get('/transaction-financial/{id}', [FinancialTransactionController::class, 'show']);
+        Route::put('/transaction-financial/{id}', [FinancialTransactionController::class, 'update']);
+        Route::delete('/transaction-financial/{id}', [FinancialTransactionController::class, 'destroy']);
+        Route::put('/transaction-financial/{id}/state', [FinancialTransactionController::class, 'updateTransactionState']);
+        // Rutas para importación y exportación de transacciones financieras
+        Route::post('/transactions/import', [ImportExcelController::class, 'import']);
+        Route::get('/transactions/plantilla', [ImportExcelController::class, 'descargarPlantilla']);
+
+
+
+
+        // Rutas para FinancialReportController
+        Route::prefix('financial-report')->group(function () {
+            // Obtener estado financiero de todos los negocios
+            Route::get('get-all-businesses-financial-statement', [FinancialReportController::class, 'getAllBusinessesFinancialStatement']);
+
+            // Exportar estado financiero de todos los negocios a Excel
+            Route::get('export-all-businesses-financial-statement-to-excel', [FinancialReportController::class, 'exportAllBusinessesFinancialStatementToExcel']);
+
+            // Obtener egresos por categoría filtrados por negocio y rango de fechas
+            Route::get('get-expenses-by-category-by-business', [FinancialReportController::class, 'getExpensesByCategoryByBusiness']);
+
+            // Exportar egresos por categoría a Excel
+            Route::get('export-expenses-by-category-by-business-to-excel', [FinancialReportController::class, 'exportExpensesByCategoryByBusinessToExcel']);
+
+            // Obtener el negocio con mayor egreso en un período
+            Route::get('get-business-with-highest-expense', [FinancialReportController::class, 'getBusinessWithHighestExpense']);
+
+            // Exportar negocio con mayor egreso a Excel
+            Route::get('export-business-with-highest-expense-to-excel', [FinancialReportController::class, 'exportBusinessWithHighestExpenseToExcel']);
+
+            // Obtener el negocio Lease On, sus vehículos y los egresos de cada vehículo
+            Route::get('get-lease-on-vehicles-with-expenses', [FinancialReportController::class, 'getLeaseOnVehiclesWithExpenses']);
+
+            // Obtener estado de resultados filtrado por negocio y rango de fechas
+            Route::post('/statement-range', [EstadoDeResultadosController::class, 'getFinancialStatementByDateRange']);
+            Route::post('/export-excel', [EstadoDeResultadosController::class, 'exportToExcel']);
+            Route::post('/export-pdf', [EstadoDeResultadosController::class, 'exportToPDF']);
+            Route::post('/preview-pdf', [EstadoDeResultadosController::class, 'previewPDF']);
+
+            // Obtener egresos por categoría filtrados por negocio y rango de fechas
+            Route::get('/expenses-by-category', [EgresosPorCategoriaController::class, 'getExpensesByCategoryByBusiness']);
+
+            // Obtener ingresos por categoría filtrados por negocio y rango de fechas
+            Route::get('/incomes-by-category', [IngresosPorNegocioController::class, 'getIncomesByBusiness']);
+            Route::get('/export-incomes-excel', [IngresosPorNegocioController::class, 'exportIncomesByBusinessToExcel']);
+            Route::get('/export-incomes-by-category-pdf', [IngresosPorNegocioController::class, 'exportIncomesByBusinessToPDF']);
+
+            //Obtener negocio con mayor egreso en un período
+            Route::get('/business-highest-expense', [NegocioConMayorEgresosController::class, 'getBusinessWithHighestExpense']);
+            //Obtener estado financiero de vehículos de un negocio
+            Route::get('/vehicles-financial-statement', [VehiculosDelNegocioController::class, 'getVehiclesFinancialStatementByBusiness']);
+            Route::get('/vehicle-financial-statement', [VehiculosDelNegocioController::class, 'getVehicleFinancialStatement']);
+            //Obtener   rendición de cajas operativas
+            Route::get('/rendicion-cajas-operativas', [RendicionCajaOperativasController::class, 'resumenCajasOperativas']);
+            // Nuevas rutas para exportación
+            Route::get('/rendicion-cajas-operativas/excel', [RendicionCajaOperativasController::class, 'exportarExcel']);
+            Route::get('/rendicion-cajas-operativas/pdf', [RendicionCajaOperativasController::class, 'exportarPDF']);
+
+            //Obtener datos relevantes del dashboard
+            Route::post('/operation', [DatosRelevantesController::class, 'getOperationReport']);
+            Route::post('/operation-summary', [DatosRelevantesController::class, 'getOperationSummary']);
+            Route::post('/daily-productivity', [DatosRelevantesController::class, 'getDailyProductivity']);
+            Route::post('/export-excel', [DatosRelevantesController::class, 'exportToExcel']);
+        });
+
+
+        Route::get('/transaction-financial-report/lease-on-vehicles', [FinancialReportController::class, 'getLeaseOnVehiclesWithExpenses']);
+        Route::get('/transaction-financial-report/all-businesses-financial-statement', [FinancialReportController::class, 'getAllBusinessesFinancialStatement']);
+
+        Route::get('movements-boxes', [MovementBoxController::class, 'index']);
+        Route::get('movements-boxes/resumen-por-categoria', [MovementBoxController::class, 'resumenPorCategoria']);
+        Route::get('movements-boxes/recientes', [MovementBoxController::class, 'recientes']);
+        Route::get('movements-boxes/{id}', [MovementBoxController::class, 'show']);
+
+
+        Route::apiResource('operating-boxes', OperatingBoxController::class);
+        Route::post('operating-boxes/{id}/activate', [OperatingBoxController::class, 'activate']);
+        Route::delete('/operating-boxes/{id}/delete-permanent', [OperatingBoxController::class, 'deletePermanent']);
+
+        Route::apiResource('categories', CategoryController::class);
+        Route::get('/categories/activas', [CategoryController::class, 'activas']);
+        Route::post('/categories/{id}/activate', [CategoryController::class, 'activate']);
+
+        Route::get('operating-boxes/{id}/history', [OperatingBoxHistoryController::class, 'getHistory']);
+        Route::post('/operating-box-history/{historyId}/pay-refund', [OperatingBoxHistoryController::class, 'payRefundTransaction']);
+
+
+        Route::prefix('business')->group(function () {
+            Route::get('/state-actives', [BusinessController::class, 'businessActives']);
+            Route::get('/', [BusinessController::class, 'index']);
+            /* Route::get('/actives', [BusinessController::class, 'businessActives']); */
+            Route::post('/', [BusinessController::class, 'store']);
+            Route::get('/{id}', [BusinessController::class, 'show']);
+            Route::put('/{id}', [BusinessController::class, 'update']);
+            Route::patch('/{id}', [BusinessController::class, 'update']);
+            Route::delete('/{id}', [BusinessController::class, 'destroy']);
+            // Nuevas rutas para activar/desactivar
+            Route::post('/{id}/activate', [BusinessController::class, 'activate']);
+            Route::post('/{id}/desactivate', [BusinessController::class, 'deactivate']);
+        });
+
+        Route::prefix('payment-method')->group(function () {
+            Route::get('/actives', [PaymentMethodController::class, 'paymentMethodsActives']);
+            Route::get('/', [PaymentMethodController::class, 'index']);
+            /* Route::get('/actives', [PaymentMethodController::class, 'paymentMethodsActives']); */
+            Route::post('/', [PaymentMethodController::class, 'store']);
+            Route::get('/{id}', [PaymentMethodController::class, 'show']);
+            Route::put('/{id}', [PaymentMethodController::class, 'update']);
+            Route::delete('/{id}', [PaymentMethodController::class, 'destroy']);
+            Route::post('/{id}/activate', [PaymentMethodController::class, 'activate']);
+            Route::post('/{id}/desactivate', [PaymentMethodController::class, 'desactivate']);
+        });
+
+        Route::get('pending-payments', [PendingPaymentsController::class, 'index']);
+        Route::post('pending-payments/{id}/process', [PendingPaymentsController::class, 'processPayment']);
+        Route::post('pending-payments/{id}/cancel', [PendingPaymentsController::class, 'cancelPayment']);
+    });
+
+    /*
+    |--------------------------------------------------------------------------
+    | Rutas de Transportista (Carrier)
+    |--------------------------------------------------------------------------
+    | Solo accesibles por usuarios con rol de carrier
+    |
+    */
+    Route::middleware(['carrier'])->group(function () {
+        Route::prefix('transaction-financial-driver')->group(function () {
+            Route::get('/payment-pendings', [DriverFinancialTransactionController::class, 'indexPaymentPendingDriver']);
+
+
+            Route::post('/new/driver', [DriverFinancialTransactionController::class, 'storeAuthDriver']);
+            Route::get('/user-transactions', [DriverFinancialTransactionController::class, 'getUserTransactions']);
+            Route::get('/driver/dashboard', [DriverFinancialTransactionController::class, 'getDriverDashboardData']);
+            Route::get('/excel-driver', [DriverFinancialTransactionController::class, 'exportToExcelDriverTransaccion']);
+        });
+        Route::prefix('business-driver')->group(function () {
+            Route::get('/state-actives-driver', [BusinessController::class, 'businessActives']);
+        });
+        Route::prefix('payment-method-driver')->group(function () {
+            Route::get('/state-actives-driver', [PaymentMethodController::class, 'paymentMethodsActives']);
+        });
+    });
+
+    /*
+    |--------------------------------------------------------------------------
+    | Rutas Comunes (Admin y Carrier)
+    |--------------------------------------------------------------------------
+    | Accesibles por ambos roles
+    |
+    */
+    Route::middleware(['role:admin|carrier'])->group(function () {
+        Route::prefix('vehicles')->group(function () {
+            Route::get('/autheticated/user', [VehicleController::class, 'getAuthenticatedUserVehicles']);
+        });
+
+        Route::get('/user', function (Request $request) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Usuario autenticado obtenido exitosamente',
+                'data' => $request->user()
+            ]);
+        });
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| Rutas Públicas (Sin autenticación)
+|--------------------------------------------------------------------------
+|
+*/
+Route::get('/operating-box/active', [OperatingBoxController::class, 'boxActives']);
+Route::prefix('category')->group(function () {
+    Route::get('/actives', [CategoryController::class, 'categoryActives']);
+});
+
+Route::prefix('transaction-states')->group(function () {
+    Route::get('/actives', [TransactionStateController::class, 'transactionStateActives']);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Ruta de Health Check
+|--------------------------------------------------------------------------
+|
+*/
+Route::get('/health', function () {
+    return response()->json([
+        'success' => true,
+        'message' => 'API funcionando correctamente',
+        'timestamp' => now(),
+        'version' => '1.0.0'
+    ]);
+});
