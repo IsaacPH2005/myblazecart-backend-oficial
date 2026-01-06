@@ -30,7 +30,7 @@ return new class extends Migration
             $table->decimal('cantidad', 10, 2)->nullable();
             $table->decimal('importe_total', 10, 2)->nullable();
             $table->string('cliente_proveedor')->nullable();
-            $table->boolean('egreso_directo')->nullable()->default(false); //true: Egreso directo, false: Egreso indirecto
+            $table->string('subcategoria')->nullable(); //De categorias su subcategoria
             $table->text('observaciones')->nullable();
             $table->boolean('estado')->nullable()->default(true);
             $table->string('archivo')->nullable()->comment('Ruta del archivo adjunto, si aplica');

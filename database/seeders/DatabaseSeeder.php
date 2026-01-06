@@ -27,7 +27,7 @@ class DatabaseSeeder extends Seeder
             BusinessSeeder::class,
             /* VehicleSeeder::class, */
 
-            CategorySeeder::class,
+            //CategorySeeder::class,
             /*  FinancialTransactionsSeeder::class, */
         ]);
     }

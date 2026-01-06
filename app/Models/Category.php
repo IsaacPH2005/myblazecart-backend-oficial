@@ -10,6 +10,10 @@ class Category extends Model
 
     protected $fillable = [
         'nombre',
+        'codigo',
+        'clasificacion',
+        'subcategoria',
+        'agrupacion',
         'descripcion',
         'estado',
     ];

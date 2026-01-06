@@ -77,19 +77,9 @@ class FinancialTransactionController extends Controller
             $query->where('categoria_id', $request->categoria);
         }
 
-        // Filtro por egreso directo (solo aplica si es un egreso)
-        if ($request->has('egreso_directo') && $request->has('tipo') && $request->tipo === 'Egreso') {
-            $egresoDirectoValue = $request->egreso_directo;
-            if ($egresoDirectoValue === 'true' || $egresoDirectoValue === 1 || $egresoDirectoValue === '1') {
-                $egresoDirecto = true;
-            } elseif ($egresoDirectoValue === 'false' || $egresoDirectoValue === 0 || $egresoDirectoValue === '0') {
-                $egresoDirecto = false;
-            } else {
-                $egresoDirecto = null;
-            }
-            if ($egresoDirecto !== null) {
-                $query->where('egreso_directo', $egresoDirecto);
-            }
+        // Filtro por subcategoría
+        if ($request->has('subcategoria')) {
+            $query->where('subcategoria', $request->subcategoria);
         }
 
         // Filtros por caja operativa
@@ -111,13 +101,12 @@ class FinancialTransactionController extends Controller
         // Clonar la consulta para cálculos globales
         $globalQuery = clone $query;
 
-        // CAMBIO IMPORTANTE: Excluir SOLO los egresos de caja marcados explícitamente como true
-        // Calcular ingresos brutos (sin incluir ingresos que son transferencias de egresos de caja)
+        // Calcular ingresos brutos (excluyendo transferencias)
         $ingresosGlobales = (clone $globalQuery)
             ->where('tipo_de_transaccion', 'Ingreso')
             ->where(function ($q) {
-                $q->where('egreso_directo', false)
-                    ->orWhereNull('egreso_directo'); // Incluir NULL como ingresos reales
+                $q->where('subcategoria', '!=', 'Transferencia')
+                    ->orWhereNull('subcategoria'); // Incluir NULL como ingresos reales
             })
             ->sum('importe_total');
 
@@ -141,12 +130,12 @@ class FinancialTransactionController extends Controller
             foreach ($cajasConTransacciones as $cajaId) {
                 $cajaQuery = (clone $globalQuery)->where('caja_operativa_id', $cajaId);
 
-                // También excluir transferencias entre cajas en el cálculo por caja
+                // Excluir transferencias en el cálculo por caja
                 $ingresosCaja = (clone $cajaQuery)
                     ->where('tipo_de_transaccion', 'Ingreso')
                     ->where(function ($q) {
-                        $q->where('egreso_directo', false)
-                            ->orWhereNull('egreso_directo');
+                        $q->where('subcategoria', '!=', 'Transferencia')
+                            ->orWhereNull('subcategoria');
                     })
                     ->sum('importe_total');
 
@@ -248,14 +237,12 @@ class FinancialTransactionController extends Controller
                 'cantidad' => 'required|numeric',
                 'importe_total' => 'required|numeric|min:0.01',
                 'cliente_proveedor' => 'nullable|string',
-                'egreso_directo' => 'required_if:tipo_de_transaccion,Egreso|boolean',
                 'observaciones' => 'nullable|string',
                 'archivo' => 'nullable|array',
                 'archivo.*' => 'file|mimes:pdf,jpg,jpeg,png,doc,docx|max:10240',
                 'numero_transaccion' => 'required|string|max:255',
             ], [
                 'required' => 'El campo :attribute es obligatorio',
-                'required_if' => 'El campo :attribute es obligatorio cuando el tipo de transacción es Egreso',
                 'exists' => 'El valor seleccionado para :attribute no es válido',
                 'date' => 'El campo :attribute debe ser una fecha válida',
                 'numeric' => 'El campo :attribute debe ser un número',
@@ -284,11 +271,9 @@ class FinancialTransactionController extends Controller
             $observaciones = $request->filled('observaciones') ? strtoupper($request->observaciones) : null;
             $numeroTransaccion = strtoupper($request->numero_transaccion);
 
-            // Determinar el valor de egreso_directo
-            $egresoDirecto = null;
-            if ($request->tipo_de_transaccion === 'Egreso') {
-                $egresoDirecto = $request->egreso_directo ?? false;
-            }
+            // Obtener la subcategoría de la categoría seleccionada
+            $categoria = \App\Models\Category::find($request->categoria_id);
+            $subcategoria = $categoria ? $categoria->subcategoria : null;
 
             // Crear transacción financiera con el usuario autenticado
             $transaction = FinancialTransactions::create([
@@ -308,7 +293,7 @@ class FinancialTransactionController extends Controller
                 'cantidad' => $request->cantidad,
                 'importe_total' => $request->importe_total,
                 'cliente_proveedor' => $clienteProveedor,
-                'egreso_directo' => $egresoDirecto,
+                'subcategoria' => $subcategoria, // Asignar la subcategoría obtenida
                 'observaciones' => $observaciones,
                 'numero_transaccion' => $numeroTransaccion,
                 'monto_excedido' => 0, // Inicializar monto excedido en 0
@@ -554,7 +539,7 @@ class FinancialTransactionController extends Controller
                     'transaction' => $transaction->load([
                         'user:id,email',
                         'negocio:id,nombre',
-                        'categoria:id,nombre',
+                        'categoria:id,nombre,subcategoria', // Incluir subcategoria en la respuesta
                         'estadoDeTransaccion:id,nombre',
                         'cajaOperativa:id,nombre,saldo'
                     ])
@@ -726,14 +711,12 @@ class FinancialTransactionController extends Controller
                 'cantidad' => 'sometimes|required|numeric',
                 'importe_total' => 'sometimes|required|numeric|min:0.01',
                 'cliente_proveedor' => 'nullable|string',
-                'egreso_directo' => 'required_if:tipo_de_transaccion,Egreso|sometimes',
                 'observaciones' => 'nullable|string',
                 'archivo' => 'nullable|array',
                 'archivo.*' => 'file|mimes:pdf,jpg,jpeg,png,doc,docx|max:10240',
                 'numero_transaccion' => 'nullable|string|max:255',
             ], [
                 'required' => 'El campo :attribute es obligatorio',
-                'required_if' => 'El campo :attribute es obligatorio cuando el tipo de transacción es Egreso',
                 'exists' => 'El valor seleccionado para :attribute no es válido',
                 'date' => 'El campo :attribute debe ser una fecha válida',
                 'numeric' => 'El campo :attribute debe ser un número',
@@ -760,22 +743,15 @@ class FinancialTransactionController extends Controller
                 'estado_de_transaccion_id' => $transaction->estado_de_transaccion_id,
                 'tipo_de_transaccion' => $transaction->tipo_de_transaccion,
                 'importe_total' => $transaction->importe_total,
-                'egreso_directo' => $transaction->egreso_directo,
+                'categoria_id' => $transaction->categoria_id,
+                'subcategoria' => $transaction->subcategoria,
             ];
 
-            // Determinar el valor de egreso_directo
-            $egresoDirecto = $transaction->egreso_directo; // Mantener el valor actual por defecto
-            if ($request->has('tipo_de_transaccion')) {
-                if ($request->tipo_de_transaccion === 'Egreso') {
-                    // Si es egreso, usar el valor proporcionado o mantener el actual
-                    $egresoDirecto = $request->has('egreso_directo') ? $request->egreso_directo : $transaction->egreso_directo;
-                } else {
-                    // Si no es egreso, establecer a null
-                    $egresoDirecto = null;
-                }
-            } elseif ($request->has('egreso_directo') && $transaction->tipo_de_transaccion === 'Egreso') {
-                // Si no cambia el tipo pero sí el egreso_directo y es un egreso
-                $egresoDirecto = $request->egreso_directo;
+            // Obtener la subcategoría si se cambia la categoría
+            $subcategoria = $transaction->subcategoria; // Mantener el valor actual por defecto
+            if ($request->has('categoria_id') && $request->categoria_id != $transaction->categoria_id) {
+                $categoria = \App\Models\Category::find($request->categoria_id);
+                $subcategoria = $categoria ? $categoria->subcategoria : null;
             }
 
             // Convertir campos de texto a mayúsculas si se proporcionan
@@ -877,7 +853,7 @@ class FinancialTransactionController extends Controller
                 'cantidad' => $request->cantidad ?? $transaction->cantidad,
                 'importe_total' => $request->importe_total ?? $transaction->importe_total,
                 'cliente_proveedor' => $clienteProveedor,
-                'egreso_directo' => $egresoDirecto,
+                'subcategoria' => $subcategoria, // Actualizar la subcategoría si cambió la categoría
                 'observaciones' => $observaciones,
                 'numero_transaccion' => $numeroTransaccion,
             ]);
@@ -1141,7 +1117,7 @@ class FinancialTransactionController extends Controller
                     'transaction' => $transaction->load([
                         'user:id,email',
                         'negocio:id,nombre',
-                        'categoria:id,nombre',
+                        'categoria:id,nombre,subcategoria', // Incluir subcategoria en la respuesta
                         'estadoDeTransaccion:id,nombre',
                         'cajaOperativa:id,nombre,saldo'
                     ]),

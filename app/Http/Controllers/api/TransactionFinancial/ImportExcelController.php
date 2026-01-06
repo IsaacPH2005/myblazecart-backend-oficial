@@ -107,7 +107,7 @@ class ImportExcelController extends Controller
                 'cantidad',
                 'importe_total',
                 'cliente_proveedor',
-                'egreso_directo',
+                'subcategoria',
                 'observaciones',
                 'numero_transaccion'
             ];
@@ -204,7 +204,7 @@ class ImportExcelController extends Controller
                     'cantidad' => $row['cantidad'] ?? null,
                     'importe_total' => $row['importe_total'] ?? null,
                     'cliente_proveedor' => $row['cliente_proveedor'] ?? null,
-                    'egreso_directo' => $row['egreso_directo'] ?? null,
+                    'subcategoria' => $row['subcategoria'] ?? null,
                     'observaciones' => $row['observaciones'] ?? null,
                     'numero_transaccion' => $row['numero_transaccion'] ?? null,
                 ];
@@ -219,9 +219,18 @@ class ImportExcelController extends Controller
                     $data['tipo_de_transaccion'] = ucfirst(strtolower(trim($data['tipo_de_transaccion'])));
                 }
 
-                // Convertir egreso_directo a booleano
-                if ($data['egreso_directo'] !== null && $data['egreso_directo'] !== '') {
-                    $data['egreso_directo'] = filter_var($data['egreso_directo'], FILTER_VALIDATE_BOOLEAN);
+                // ========== LÓGICA MEJORADA: OBTENER SUBCATEGORÍA DE LA CATEGORÍA ==========
+                // Si no se proporcionó subcategoría en el Excel, obtenerla de la categoría
+                if (empty($data['subcategoria']) && !empty($data['categoria_id'])) {
+                    $categoria = Category::find($data['categoria_id']);
+                    if ($categoria && !empty($categoria->subcategoria)) {
+                        $data['subcategoria'] = $categoria->subcategoria;
+                    }
+                }
+
+                // Si se proporcionó subcategoría en el Excel, limpiarla y usarla
+                if (!empty($data['subcategoria'])) {
+                    $data['subcategoria'] = trim($data['subcategoria']);
                 }
 
                 // Validación con reglas de Laravel
@@ -241,7 +250,7 @@ class ImportExcelController extends Controller
                     'cantidad' => 'required|numeric',
                     'importe_total' => 'nullable|numeric|min:0.01',
                     'cliente_proveedor' => 'nullable|string',
-                    'egreso_directo' => 'nullable|boolean',
+                    'subcategoria' => 'nullable|string',
                     'observaciones' => 'nullable|string',
                     'numero_transaccion' => 'nullable',
                 ];
@@ -279,6 +288,9 @@ class ImportExcelController extends Controller
                 $rowNumber = $validRow['originalIndex'] + 2;
 
                 try {
+                    // ========== YA NO ES NECESARIO: La subcategoría ya fue obtenida en la validación ==========
+                    // La lógica de obtener subcategoría ahora está en el bloque de validación arriba
+
                     // ========== CREAR TRANSACCIÓN FINANCIERA ==========
                     $transaction = FinancialTransactions::create([
                         'negocio_id' => $data['negocio_id'],
@@ -297,7 +309,7 @@ class ImportExcelController extends Controller
                         'cantidad' => $data['cantidad'],
                         'importe_total' => $data['importe_total'],
                         'cliente_proveedor' => !empty($data['cliente_proveedor']) ? strtoupper($data['cliente_proveedor']) : null,
-                        'egreso_directo' => $data['tipo_de_transaccion'] === 'Egreso' ? ($data['egreso_directo'] ?? false) : null,
+                        'subcategoria' => $data['subcategoria'], // Ya tiene la subcategoría correcta
                         'observaciones' => !empty($data['observaciones']) ? strtoupper($data['observaciones']) : null,
                         'numero_transaccion' => !empty($data['numero_transaccion']) ? strtoupper($data['numero_transaccion']) : 'IMPORT-' . time() . '-' . $rowNumber,
                         'monto_excedido' => 0,
@@ -305,7 +317,6 @@ class ImportExcelController extends Controller
 
                     // ============== LÓGICA DE CAJAS OPERATIVAS ==============
                     if ($data['caja_operativa_id']) {
-                        // CORRECCIÓN 1: Usar findOrFail para mejor manejo de errores
                         $cajaOperativa = OperatingBox::findOrFail($data['caja_operativa_id']);
 
                         $item = strtoupper($data['item']);
@@ -335,7 +346,6 @@ class ImportExcelController extends Controller
 
                                 $descripcionHistorial = "EGRESO COMPLETO (IMPORTACIÓN): {$item}. MONTO: " . number_format($importeTotal, 2);
 
-                                // CORRECCIÓN 2: Verificar que el servicio existe y está inyectado
                                 if ($this->operatingBoxHistoryService) {
                                     $this->operatingBoxHistoryService->registrarMovimiento(
                                         $cajaOperativa,
@@ -346,8 +356,6 @@ class ImportExcelController extends Controller
                                         $saldoAnterior,
                                         $cajaOperativa->saldo
                                     );
-                                } else {
-                                    Log::warning("OperatingBoxHistoryService no disponible en fila {$rowNumber}");
                                 }
 
                                 $cajasActualizadas[] = [
@@ -368,15 +376,12 @@ class ImportExcelController extends Controller
                                 $saldoDisponible = $cajaOperativa->saldo;
                                 $excedentePorPagar = $importeTotal - $saldoDisponible;
 
-                                // Actualizar saldo a cero
                                 $cajaOperativa->saldo = 0;
                                 $cajaOperativa->save();
 
-                                // Actualizar monto excedido en transacción
                                 $transaction->monto_excedido = $excedentePorPagar;
                                 $transaction->save();
 
-                                // Actualizar monto excedido en movement_box
                                 $movementBox->monto_excedido = $excedentePorPagar;
                                 $movementBox->save();
 
@@ -385,7 +390,6 @@ class ImportExcelController extends Controller
                                     "MONTO DESCONTADO: " . number_format($saldoDisponible, 2) . ". " .
                                     "MONTO EXCEDIDO: " . number_format($excedentePorPagar, 2);
 
-                                // CORRECCIÓN 3: Registrar historial con tipo EGRESO_PARCIAL
                                 if ($this->operatingBoxHistoryService) {
                                     $this->operatingBoxHistoryService->registrarMovimiento(
                                         $cajaOperativa,
@@ -396,19 +400,11 @@ class ImportExcelController extends Controller
                                         $saldoAnterior,
                                         0
                                     );
-                                } else {
-                                    Log::warning("OperatingBoxHistoryService no disponible en fila {$rowNumber}");
                                 }
 
-                                // ===== CORRECCIÓN 4: CREAR PAGO PENDIENTE CON VALIDACIÓN ROBUSTA =====
+                                // ===== CREAR PAGO PENDIENTE =====
                                 if ($excedentePorPagar > 0) {
                                     try {
-                                        // Validar que el modelo existe
-                                        if (!class_exists(PendingPayment::class)) {
-                                            throw new \Exception("El modelo PendingPayment no existe");
-                                        }
-
-                                        // Preparar datos con valores por defecto seguros
                                         $pendingPaymentData = [
                                             'negocio_id' => $data['negocio_id'],
                                             'driver_id' => null,
@@ -419,55 +415,26 @@ class ImportExcelController extends Controller
                                             'user_id' => $user->id,
                                         ];
 
-                                        // CORRECCIÓN 5: Solo agregar created_at si la columna existe
-                                        // Verificar si la tabla tiene la columna created_at personalizada
                                         $tableColumns = DB::getSchemaBuilder()->getColumnListing('pending_payments');
                                         if (in_array('fecha_creacion', $tableColumns)) {
                                             $pendingPaymentData['fecha_creacion'] = now();
                                         }
 
-                                        // Crear el pago pendiente
                                         $pendingPayment = PendingPayment::create($pendingPaymentData);
 
-                                        // Verificar creación exitosa
-                                        if (!$pendingPayment || !$pendingPayment->id) {
-                                            throw new \Exception("No se pudo crear el registro en la base de datos");
+                                        if ($pendingPayment && $pendingPayment->id) {
+                                            $pagosPendientesCreados[] = [
+                                                'fila' => $rowNumber,
+                                                'pending_payment_id' => $pendingPayment->id,
+                                                'monto' => $excedentePorPagar,
+                                                'descripcion' => $pendingPayment->descripcion,
+                                                'transaction_id' => $transaction->id,
+                                                'numero_transaccion' => $numeroTransaccion,
+                                            ];
                                         }
-
-                                        // Log exitoso
-                                        Log::info("Pago pendiente creado exitosamente", [
-                                            'id' => $pendingPayment->id,
-                                            'fila' => $rowNumber,
-                                            'monto' => $excedentePorPagar,
-                                            'transaction_id' => $transaction->id
-                                        ]);
-
-                                        // Agregar a la lista de pagos pendientes creados
-                                        $pagosPendientesCreados[] = [
-                                            'fila' => $rowNumber,
-                                            'pending_payment_id' => $pendingPayment->id,
-                                            'monto' => $excedentePorPagar,
-                                            'descripcion' => $pendingPayment->descripcion,
-                                            'transaction_id' => $transaction->id,
-                                            'numero_transaccion' => $numeroTransaccion,
-                                        ];
-                                    } catch (\Illuminate\Database\QueryException $e) {
-                                        // Error de base de datos específico
-                                        $errorMsg = "Fila {$rowNumber}: Error de BD al crear pago pendiente: " . $e->getMessage();
-                                        Log::error($errorMsg, [
-                                            'sql' => $e->getSql(),
-                                            'bindings' => $e->getBindings(),
-                                            'data' => $pendingPaymentData ?? []
-                                        ]);
-                                        $importErrors[] = $errorMsg;
                                     } catch (\Exception $e) {
-                                        // Otros errores
-                                        $errorMsg = "Fila {$rowNumber}: Error al crear pago pendiente: " . $e->getMessage();
-                                        Log::error($errorMsg, [
-                                            'trace' => $e->getTraceAsString(),
-                                            'data' => $pendingPaymentData ?? []
-                                        ]);
-                                        $importErrors[] = $errorMsg;
+                                        $importErrors[] = "Fila {$rowNumber}: Error al crear pago pendiente: " . $e->getMessage();
+                                        Log::error("Error creando pago pendiente", ['error' => $e->getMessage()]);
                                     }
                                 }
 
@@ -490,13 +457,11 @@ class ImportExcelController extends Controller
                         elseif ($data['tipo_de_transaccion'] === 'Ingreso') {
                             $saldoAnterior = $cajaOperativa->saldo;
 
-                            // Agregar monto a la caja
                             $cajaOperativa->saldo += $importeTotal;
                             $cajaOperativa->save();
 
                             $descripcionHistorial = "INGRESO COMPLETO (IMPORTACIÓN): {$item}. MONTO: " . number_format($importeTotal, 2);
 
-                            // CORRECCIÓN 6: Registrar historial de ingreso
                             if ($this->operatingBoxHistoryService) {
                                 $this->operatingBoxHistoryService->registrarMovimiento(
                                     $cajaOperativa,
@@ -507,8 +472,6 @@ class ImportExcelController extends Controller
                                     $saldoAnterior,
                                     $cajaOperativa->saldo
                                 );
-                            } else {
-                                Log::warning("OperatingBoxHistoryService no disponible en fila {$rowNumber}");
                             }
 
                             $cajasActualizadas[] = [
@@ -524,19 +487,9 @@ class ImportExcelController extends Controller
                     }
 
                     $importedCount++;
-                } catch (\Illuminate\Database\QueryException $e) {
-                    // Manejar errores de base de datos
-                    $importErrors[] = "Fila {$rowNumber}: Error de BD: " . $e->getMessage();
-                    Log::error("Error de BD en fila {$rowNumber}", [
-                        'sql' => $e->getSql(),
-                        'bindings' => $e->getBindings(),
-                        'message' => $e->getMessage()
-                    ]);
                 } catch (\Exception $e) {
                     $importErrors[] = "Fila {$rowNumber}: " . $e->getMessage();
-                    Log::error("Error en fila {$rowNumber}: " . $e->getMessage(), [
-                        'trace' => $e->getTraceAsString()
-                    ]);
+                    Log::error("Error en fila {$rowNumber}: " . $e->getMessage());
                 }
             }
 
@@ -551,25 +504,21 @@ class ImportExcelController extends Controller
                 'total_rows_processed' => count($validRows),
             ];
 
-            // Agregar información de cajas actualizadas
             if (count($cajasActualizadas) > 0) {
                 $response['cajas_actualizadas'] = $cajasActualizadas;
                 $response['total_cajas_actualizadas'] = count($cajasActualizadas);
             }
 
-            // Agregar información de pagos pendientes creados
             if (count($pagosPendientesCreados) > 0) {
                 $response['pagos_pendientes_creados'] = $pagosPendientesCreados;
                 $response['total_pagos_pendientes'] = count($pagosPendientesCreados);
             }
 
-            // Agregar advertencias
             if (count($advertencias) > 0) {
                 $response['advertencias'] = $advertencias;
                 $response['total_advertencias'] = count($advertencias);
             }
 
-            // Si hubo errores en algunas filas
             if (count($importErrors) > 0) {
                 $response['status'] = 'warning';
                 $response['message'] = 'Importación completada con advertencias';
@@ -579,31 +528,459 @@ class ImportExcelController extends Controller
             }
 
             return response()->json($response, 200);
-        } catch (\PhpOffice\PhpSpreadsheet\Reader\Exception $e) {
-            DB::rollBack();
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Error al leer el archivo Excel',
-                'details' => 'El archivo no pudo ser procesado. Verifique que sea un archivo válido de Excel.',
-                'technical_error' => $e->getMessage()
-            ], 500);
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Error crítico en importación', [
                 'message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString()
             ]);
             return response()->json([
                 'status' => 'error',
                 'message' => 'Error en el servidor',
                 'details' => 'Ha ocurrido un error al procesar la solicitud.',
-                'technical_error' => $e->getMessage() . ' en ' . $e->getFile() . ':' . $e->getLine()
+                'technical_error' => $e->getMessage()
             ], 500);
         }
     }
-    /*     public function import(Request $request)
+    /**
+     * Descargar plantilla para importar transacciones financieras
+     */
+    public function descargarPlantilla()
+    {
+        try {
+            // Crear nuevo objeto Spreadsheet
+            $spreadsheet = new Spreadsheet();
+
+            // Obtener la hoja activa para la plantilla
+            $sheet = $spreadsheet->getActiveSheet();
+            $sheet->setTitle('Plantilla de Importación');
+
+            // Encabezados
+            $headers = [
+                'negocio_id',
+                'metodo_id',
+                'categoria_id',
+                'vehicle_id',
+                'estado_de_transaccion_id',
+                'caja_operativa_id',
+                'fecha',
+                'punto_de_partida',
+                'destino',
+                'millas',
+                'tipo_de_transaccion',
+                'item',
+                'cantidad',
+                'importe_total',
+                'cliente_proveedor',
+                'subcategoria',
+                'observaciones',
+                'numero_transaccion'
+            ];
+
+            // Agregar encabezados
+            $sheet->fromArray($headers, null, 'A1');
+
+            // Estilo para encabezados
+            $headerStyle = [
+                'font' => [
+                    'bold' => true,
+                    'color' => ['rgb' => 'FFFFFF'],
+                ],
+                'fill' => [
+                    'fillType' => Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => '4472C4'],
+                ],
+                'alignment' => [
+                    'horizontal' => Alignment::HORIZONTAL_CENTER,
+                    'vertical' => Alignment::VERTICAL_CENTER,
+                ],
+                'borders' => [
+                    'allBorders' => [
+                        'borderStyle' => Border::BORDER_THIN,
+                        'color' => ['rgb' => '000000'],
+                    ],
+                ],
+            ];
+            $sheet->getStyle('A1:R1')->applyFromArray($headerStyle);
+
+            // Ajustar altura de la fila de encabezados
+            $sheet->getRowDimension(1)->setRowHeight(25);
+
+            // ========== AGREGAR COMENTARIOS IMPORTANTES ==========
+
+            // Comentario en fecha (G1)
+            $richTextFecha = new RichText();
+            $richTextFecha->createText('IMPORTANTE: Ingrese las fechas en formato YYYY-MM-DD (ej: 2025-05-23). No cambie el formato de esta columna a "Fecha" en Excel.');
+            $sheet->getComment('G1')
+                ->setAuthor('Sistema')
+                ->setText($richTextFecha);
+
+            // ========== NUEVO: Comentario en subcategoria (P1) ==========
+            $richTextSubcategoria = new RichText();
+            $richTextSubcategoria->createText(
+                "AUTOMÁTICO: Este campo es OPCIONAL. " .
+                    "Si lo deja vacío, el sistema tomará automáticamente la subcategoría de la categoría seleccionada (categoria_id). " .
+                    "Solo complete este campo si desea usar una subcategoría diferente. " .
+                    "Valores permitidos: Transferencia, Compra, Venta, Servicio."
+            );
+            $sheet->getComment('P1')
+                ->setAuthor('Sistema')
+                ->setText($richTextSubcategoria);
+
+            // Hacer la columna subcategoria más visible con color diferente
+            $subcategoriaHeaderStyle = [
+                'font' => [
+                    'bold' => true,
+                    'color' => ['rgb' => 'FFFFFF'],
+                ],
+                'fill' => [
+                    'fillType' => Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'FFA500'], // Naranja para destacar
+                ],
+                'alignment' => [
+                    'horizontal' => Alignment::HORIZONTAL_CENTER,
+                    'vertical' => Alignment::VERTICAL_CENTER,
+                ],
+                'borders' => [
+                    'allBorders' => [
+                        'borderStyle' => Border::BORDER_THIN,
+                        'color' => ['rgb' => '000000'],
+                    ],
+                ],
+            ];
+            $sheet->getStyle('P1')->applyFromArray($subcategoriaHeaderStyle);
+
+            // ========== EJEMPLOS ACTUALIZADOS ==========
+            // Ejemplo 1: subcategoria vacía (se tomará de la categoría)
+            // Ejemplo 2: subcategoria vacía (se tomará de la categoría)
+            // Ejemplo 3: subcategoria especificada (se usará la especificada)
+            $exampleData = [
+                [1, 2, 3, 1, 1, 1, '2025-09-10', 'Oficina Central', 'Sucursal Norte', 120, 'Ingreso', 'Venta de producto', 10, 1500.00, 'Cliente S.A.', '', 'Venta mensual', ''],
+                [1, 1, 4, null, 2, 1, '2025-09-10', 'Sucursal Norte', 'Proveedor X', 80, 'Egreso', 'Compra de insumos', 5, 750.50, 'Proveedor Y', '', 'Compra urgente', ''],
+                [1, 3, 2, 1, 1, 2, '2025-09-10', 'Almacén Central', 'Tienda Z', 45, 'Ingreso', 'Servicio técnico', 2, 350.00, 'Cliente Z', 'Servicio', 'Mantenimiento equipo', ''],
+            ];
+
+            // Agregar datos de ejemplo
+            $sheet->fromArray($exampleData, null, 'A2');
+
+            // IMPORTANTE: Formatear la columna de fechas como TEXTO
+            $lastRow = count($exampleData) + 1;
+            $sheet->getStyle('G2:G' . $lastRow)
+                ->getNumberFormat()
+                ->setFormatCode('@');
+
+            // Establecer explícitamente cada celda de fecha como texto
+            for ($row = 2; $row <= $lastRow; $row++) {
+                $sheet->setCellValueExplicit('G' . $row, $sheet->getCell('G' . $row)->getValue(), DataType::TYPE_STRING);
+            }
+
+            // ========== NUEVO: Estilo para columna subcategoria en ejemplos ==========
+            $sheet->getStyle('P2:P' . $lastRow)->applyFromArray([
+                'fill' => [
+                    'fillType' => Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'FFF4E6'], // Naranja claro
+                ],
+                'borders' => [
+                    'allBorders' => [
+                        'borderStyle' => Border::BORDER_THIN,
+                        'color' => ['rgb' => 'D9D9D9'],
+                    ],
+                ],
+            ]);
+
+            // Estilo para datos de ejemplo
+            $dataStyle = [
+                'borders' => [
+                    'allBorders' => [
+                        'borderStyle' => Border::BORDER_THIN,
+                        'color' => ['rgb' => 'D9D9D9'],
+                    ],
+                ],
+                'alignment' => [
+                    'vertical' => Alignment::VERTICAL_CENTER,
+                ],
+            ];
+            $sheet->getStyle('A2:R' . $lastRow)->applyFromArray($dataStyle);
+
+            // Formatear columnas numéricas
+            $sheet->getStyle('J2:J' . $lastRow)->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_NUMBER);
+            $sheet->getStyle('M2:M' . $lastRow)->getNumberFormat()->setFormatCode(NumberFormat::FORMAT_NUMBER);
+            $sheet->getStyle('N2:N' . $lastRow)->getNumberFormat()->setFormatCode('#,##0.00');
+
+            // Autoajustar columnas
+            foreach (range('A', 'R') as $column) {
+                $sheet->getColumnDimension($column)->setAutoSize(true);
+            }
+
+            // Congelar la fila de encabezados
+            $sheet->freezePane('A2');
+
+            // ========== HOJA DE REFERENCIA DE IDS ==========
+            $referenceSheet = $spreadsheet->createSheet();
+            $referenceSheet->setTitle('Referencia de IDs');
+
+            $referenceSheet->setCellValue('A1', 'Tabla');
+            $referenceSheet->setCellValue('B1', 'ID');
+            $referenceSheet->setCellValue('C1', 'Nombre/Descripción');
+
+            $refHeaderStyle = [
+                'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '70AD47']],
+                'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+                'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => '000000']]],
+            ];
+            $referenceSheet->getStyle('A1:C1')->applyFromArray($refHeaderStyle);
+
+            $refDataStyle = [
+                'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => 'D9D9D9']]],
+            ];
+
+            $refCategoryStyle = [
+                'font' => ['bold' => true],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E2EFDA']],
+                'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => '000000']]],
+            ];
+
+            $row = 2;
+
+            // Negocios
+            $negocios = Business::all(['id', 'nombre']);
+            $referenceSheet->setCellValue('A' . $row, 'Negocios');
+            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refCategoryStyle);
+            $row++;
+            foreach ($negocios as $negocio) {
+                $referenceSheet->setCellValue('B' . $row, $negocio->id);
+                $referenceSheet->setCellValue('C' . $row, $negocio->nombre);
+                $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
+                $row++;
+            }
+            $row++;
+
+            // Métodos de pago
+            $metodos = PaymentMethod::all(['id', 'nombre']);
+            $referenceSheet->setCellValue('A' . $row, 'Métodos de Pago');
+            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refCategoryStyle);
+            $row++;
+            foreach ($metodos as $metodo) {
+                $referenceSheet->setCellValue('B' . $row, $metodo->id);
+                $referenceSheet->setCellValue('C' . $row, $metodo->nombre);
+                $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
+                $row++;
+            }
+            $row++;
+
+            // ========== CATEGORÍAS CON SUBCATEGORÍA DESTACADA ==========
+            $categorias = Category::all(['id', 'nombre', 'subcategoria']);
+            $referenceSheet->setCellValue('A' . $row, 'Categorías (⭐ con subcategoría automática)');
+            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refCategoryStyle);
+            $row++;
+            foreach ($categorias as $categoria) {
+                $referenceSheet->setCellValue('B' . $row, $categoria->id);
+                $subcategoriaText = $categoria->subcategoria ?: 'N/A';
+                $referenceSheet->setCellValue('C' . $row, $categoria->nombre . ' → Subcategoría: ' . $subcategoriaText);
+                $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
+                $row++;
+            }
+            $row++;
+
+            // Vehículos
+            $vehiculos = Vehicle::all(['id', 'modelo', 'numero_placa']);
+            $referenceSheet->setCellValue('A' . $row, 'Vehículos');
+            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refCategoryStyle);
+            $row++;
+            foreach ($vehiculos as $vehiculo) {
+                $referenceSheet->setCellValue('B' . $row, $vehiculo->id);
+                $referenceSheet->setCellValue('C' . $row, $vehiculo->modelo . ' (' . $vehiculo->numero_placa . ')');
+                $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
+                $row++;
+            }
+            $row++;
+
+            // Estados de transacción
+            $estados = TransactionStates::all(['id', 'nombre']);
+            $referenceSheet->setCellValue('A' . $row, 'Estados de Transacción');
+            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refCategoryStyle);
+            $row++;
+            foreach ($estados as $estado) {
+                $referenceSheet->setCellValue('B' . $row, $estado->id);
+                $referenceSheet->setCellValue('C' . $row, $estado->nombre);
+                $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
+                $row++;
+            }
+            $row++;
+
+            // Cajas operativas
+            $cajasOperativas = OperatingBox::all(['id', 'nombre', 'saldo']);
+            $referenceSheet->setCellValue('A' . $row, 'Cajas Operativas');
+            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refCategoryStyle);
+            $row++;
+            foreach ($cajasOperativas as $caja) {
+                $referenceSheet->setCellValue('B' . $row, $caja->id);
+                $saldoFormateado = number_format($caja->saldo, 2, '.', ',');
+                $referenceSheet->setCellValue('C' . $row, $caja->nombre . ' (Saldo: ' . $saldoFormateado . ')');
+                $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
+                $row++;
+            }
+            $row++;
+
+            // ========== SECCIÓN ACTUALIZADA DE SUBCATEGORÍAS ==========
+            $referenceSheet->setCellValue('A' . $row, '⭐ Campo subcategoria (OPCIONAL)');
+            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refCategoryStyle);
+            $row++;
+
+            $referenceSheet->setCellValue('B' . $row, '(vacío)');
+            $referenceSheet->setCellValue('C' . $row, '⭐ RECOMENDADO: Dejar vacío para usar la subcategoría de la categoría');
+            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray([
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFEB9C']],
+                'font' => ['bold' => true],
+                'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => '000000']]],
+            ]);
+            $row++;
+
+            $referenceSheet->setCellValue('B' . $row, 'Transferencia');
+            $referenceSheet->setCellValue('C' . $row, 'Para transferencias entre cajas (solo si difiere de la categoría)');
+            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
+            $row++;
+
+            $referenceSheet->setCellValue('B' . $row, 'Compra');
+            $referenceSheet->setCellValue('C' . $row, 'Para compras de productos o servicios (solo si difiere de la categoría)');
+            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
+            $row++;
+
+            $referenceSheet->setCellValue('B' . $row, 'Venta');
+            $referenceSheet->setCellValue('C' . $row, 'Para ventas de productos o servicios (solo si difiere de la categoría)');
+            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
+            $row++;
+
+            $referenceSheet->setCellValue('B' . $row, 'Servicio');
+            $referenceSheet->setCellValue('C' . $row, 'Para servicios técnicos o profesionales (solo si difiere de la categoría)');
+            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
+
+            foreach (range('A', 'C') as $column) {
+                $referenceSheet->getColumnDimension($column)->setAutoSize(true);
+            }
+            $referenceSheet->freezePane('A2');
+
+            // ========== HOJA DE INSTRUCCIONES ACTUALIZADA ==========
+            $instructionSheet = $spreadsheet->createSheet();
+            $instructionSheet->setTitle('Instrucciones');
+
+            $instructions = [
+                '📋 Instrucciones para importar transacciones financieras:',
+                '',
+                '1. Complete la hoja "Plantilla de Importación" con los datos de las transacciones.',
+                '2. Para los campos que requieren IDs (negocio_id, metodo_id, etc.), consulte la hoja "Referencia de IDs".',
+                '3. El campo "vehicle_id" es opcional, puede dejarlo vacío si no aplica.',
+                '',
+                '⭐ 4. IMPORTANTE - Campo "subcategoria" (AUTOMÁTICO):',
+                '   ✅ RECOMENDADO: Deje este campo VACÍO',
+                '   → El sistema tomará automáticamente la subcategoría de la categoría que seleccionó (categoria_id)',
+                '   → Por ejemplo: Si selecciona categoria_id = 3 (Ventas), y esa categoría tiene subcategoria = "Venta",',
+                '     el sistema guardará "Venta" automáticamente en la transacción financiera.',
+                '',
+                '   ⚠️ Solo complete el campo "subcategoria" si desea usar una diferente a la de la categoría.',
+                '   Valores permitidos si lo llena: Transferencia, Compra, Venta, Servicio',
+                '',
+                '5. El campo "numero_transaccion" es opcional. Si no se proporciona, se generará automáticamente.',
+                '',
+                '6. El campo "fecha" debe tener formato YYYY-MM-DD (por ejemplo: 2025-05-23).',
+                '   IMPORTANTE: La columna de fecha está configurada como TEXTO para evitar que Excel la modifique.',
+                '   SIEMPRE escriba las fechas en formato YYYY-MM-DD.',
+                '',
+                '7. Una vez completados los datos, guarde el archivo y súbalo al sistema.',
+                '',
+                '⚠️ ADVERTENCIA CRÍTICA SOBRE FECHAS ⚠️',
+                '',
+                'PROBLEMA COMÚN: Excel cambia automáticamente el formato de las fechas sin su consentimiento.',
+                'SOLUCIÓN:',
+                '',
+                '1. NUNCA cambie el formato de la columna de fecha a "Fecha" de Excel.',
+                '2. Si Excel muestra un número (ej: 45678) en lugar de la fecha, significa que la cambió a formato numérico.',
+                '3. Para corregir: haga clic derecho en la celda > Formato de celdas > Texto, luego escriba la fecha como texto.',
+                '4. Use SIEMPRE el formato YYYY-MM-DD (ej: 2025-05-23, 2025-12-31, 2025-01-15).',
+                '',
+                '💡 TÉCNICAS PARA EVITAR QUE EXCEL CAMBIE LAS FECHAS:',
+                '',
+                'Técnica 1: Escriba un apóstrofo antes de la fecha: \'2025-05-23',
+                'Técnica 2: Copie la fecha desde un editor de texto y péguela en Excel.',
+                'Técnica 3: Si Excel insiste en cambiar el formato, deshaga el cambio (Ctrl+Z) inmediatamente.',
+                'Técnica 4: Si ve que la fecha cambió (ej: 23/5/2025), cámbiela de vuelta a YYYY-MM-DD (2025-05-23).',
+                '',
+                '📝 Notas importantes generales:',
+                '- Los IDs deben coincidir exactamente con los listados en la hoja de referencia.',
+                '- Verifique que los tipos de transacción sean "Ingreso" o "Egreso" (con mayúscula inicial).',
+                '- Asegúrese de que los montos sean números positivos.',
+                '- No modifique los encabezados de las columnas.',
+                '- El campo "caja_operativa_id" es opcional.',
+                '',
+                '❌ ¿Qué pasa si no sigo estas instrucciones?',
+                '- Si ingresa una fecha en formato incorrecto, la importación fallará.',
+                '- Si Excel cambia el formato de la fecha, la importación fallará.',
+                '- Si la fecha no está en formato YYYY-MM-DD, la importación fallará.',
+                '',
+                '✅ Ejemplos de uso correcto del campo subcategoria:',
+                '',
+                'Ejemplo 1 (RECOMENDADO):',
+                '  categoria_id = 5, subcategoria = (vacío)',
+                '  → El sistema busca la categoría con ID 5',
+                '  → Si esa categoría tiene subcategoria = "Compra", guarda "Compra" automáticamente',
+                '',
+                'Ejemplo 2 (personalizado):',
+                '  categoria_id = 5, subcategoria = "Servicio"',
+                '  → El sistema respeta tu elección y guarda "Servicio" en lugar de la subcategoría de la categoría',
+                '',
+                'Recuerde: El sistema necesita fechas en formato YYYY-MM-DD para funcionar correctamente.'
+            ];
+
+            foreach ($instructions as $index => $instruction) {
+                $instructionSheet->setCellValue('A' . ($index + 1), $instruction);
+            }
+
+            $instructionTitleStyle = [
+                'font' => ['bold' => true, 'size' => 16, 'color' => ['rgb' => '4472C4']],
+            ];
+            $instructionSheet->getStyle('A1')->applyFromArray($instructionTitleStyle);
+
+            $instructionSectionStyle = [
+                'font' => ['bold' => true, 'size' => 14, 'color' => ['rgb' => '70AD47']],
+            ];
+            $instructionSheet->getStyle('A7')->applyFromArray($instructionSectionStyle);
+            $instructionSheet->getStyle('A22')->applyFromArray($instructionSectionStyle);
+            $instructionSheet->getStyle('A31')->applyFromArray($instructionSectionStyle);
+            $instructionSheet->getStyle('A52')->applyFromArray($instructionSectionStyle);
+
+            $instructionCellStyle = [
+                'alignment' => ['vertical' => Alignment::VERTICAL_TOP, 'wrapText' => true],
+            ];
+            $instructionSheet->getStyle('A1:A' . count($instructions))->applyFromArray($instructionCellStyle);
+
+            $instructionSheet->getColumnDimension('A')->setWidth(120);
+
+            // Establecer la hoja de plantilla como activa
+            $spreadsheet->setActiveSheetIndex(0);
+
+            // Crear escritor
+            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+
+            $fileName = 'plantilla_transacciones_financieras.xlsx';
+            $tempFile = tempnam(sys_get_temp_dir(), $fileName);
+            $writer->save($tempFile);
+
+            return response()->download($tempFile, $fileName, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'Content-Disposition' => 'attachment; filename="' . $fileName . '"',
+            ])->deleteFileAfterSend(true);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Error al generar la plantilla: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+}
+
+
+
+ /*     public function import(Request $request)
     {
         try {
             // Verificar autenticación y rol de administrador
@@ -1120,10 +1497,10 @@ class ImportExcelController extends Controller
             ], 500);
         }
     } */
-    /**
-     * Importar transacciones financieras desde un archivo Excel.
-     * SOLUCIÓN DEFINITIVA para manejo de fechas, robusta y a prueba de zonas horarias.
-     */
+/**
+ * Importar transacciones financieras desde un archivo Excel.
+ * SOLUCIÓN DEFINITIVA para manejo de fechas, robusta y a prueba de zonas horarias.
+ */
     /*  public function import(Request $request)
     {
         try {
@@ -1422,421 +1799,8 @@ class ImportExcelController extends Controller
         }
     } */
 
-    /**
-     * Descargar plantilla para importar transacciones financieras
-     */
-    public function descargarPlantilla()
-    {
-        try {
-            // Crear nuevo objeto Spreadsheet
-            $spreadsheet = new Spreadsheet();
 
-            // Obtener la hoja activa para la plantilla
-            $sheet = $spreadsheet->getActiveSheet();
-            $sheet->setTitle('Plantilla de Importación');
 
-            // Encabezados
-            $headers = [
-                'negocio_id',
-                'metodo_id',
-                'categoria_id',
-                'vehicle_id',
-                'estado_de_transaccion_id',
-                'caja_operativa_id',
-                'fecha',
-                'punto_de_partida',
-                'destino',
-                'millas',
-                'tipo_de_transaccion',
-                'item',
-                'cantidad',
-                'importe_total',
-                'cliente_proveedor',
-                'egreso_directo',
-                'observaciones',
-                'numero_transaccion'
-            ];
-
-            // Agregar encabezados
-            $sheet->fromArray($headers, null, 'A1');
-
-            // Estilo para encabezados
-            $headerStyle = [
-                'font' => [
-                    'bold' => true,
-                    'color' => ['rgb' => 'FFFFFF'],
-                ],
-                'fill' => [
-                    'fillType' => Fill::FILL_SOLID,
-                    'startColor' => ['rgb' => '4472C4'],
-                ],
-                'alignment' => [
-                    'horizontal' => Alignment::HORIZONTAL_CENTER,
-                    'vertical' => Alignment::VERTICAL_CENTER,
-                ],
-                'borders' => [
-                    'allBorders' => [
-                        'borderStyle' => Border::BORDER_THIN,
-                        'color' => ['rgb' => '000000'],
-                    ],
-                ],
-            ];
-            $sheet->getStyle('A1:R1')->applyFromArray($headerStyle);
-
-            // Ajustar altura de la fila de encabezados
-            $sheet->getRowDimension(1)->setRowHeight(25);
-
-            // Agregar comentario a la celda de fecha (G1)
-            $richText = new RichText();
-            $richText->createText('IMPORTANTE: Ingrese las fechas en formato YYYY-MM-DD (ej: 2025-05-23). No cambie el formato de esta columna a "Fecha" en Excel.');
-            $sheet->getComment('G1')
-                ->setAuthor('Sistema')
-                ->setText($richText);
-
-            // Ejemplo de datos con fecha modificada
-            $exampleData = [
-                [1, 2, 3, 1, 1, 1, '2025-09-10', 'Oficina Central', 'Sucursal Norte', 120, 'Ingreso', 'Venta de producto', 10, 1500.00, 'Cliente S.A.', '', 'Venta mensual', ''],
-                [1, 1, 4, null, 2, 1, '2025-09-10', 'Sucursal Norte', 'Proveedor X', 80, 'Egreso', 'Compra de insumos', 5, 750.50, 'Proveedor Y', 1, 'Egreso directo - Compra urgentes', ''],
-                [1, 3, 2, 1, 1, 2, '2025-09-10', 'Almacén Central', 'Tienda Z', 45, 'Ingreso', 'Servicio técnico', 2, 350.00, 'Cliente Z', '', 'Mantenimiento equipo', ''],
-            ];
-
-            // Agregar datos de ejemplo
-            $sheet->fromArray($exampleData, null, 'A2');
-
-            // IMPORTANTE: Formatear la columna de fechas como TEXTO antes de agregar los valores
-            $lastRow = count($exampleData) + 1;
-            $sheet->getStyle('G2:G' . $lastRow)
-                ->getNumberFormat()
-                ->setFormatCode('@'); // @ es el código para formato de texto
-
-            // Establecer explícitamente cada celda de fecha como texto
-            for ($row = 2; $row <= $lastRow; $row++) {
-                $sheet->setCellValueExplicit('G' . $row, $sheet->getCell('G' . $row)->getValue(), DataType::TYPE_STRING);
-            }
-
-            // Estilo para datos de ejemplo
-            $dataStyle = [
-                'borders' => [
-                    'allBorders' => [
-                        'borderStyle' => Border::BORDER_THIN,
-                        'color' => ['rgb' => 'D9D9D9'],
-                    ],
-                ],
-                'alignment' => [
-                    'vertical' => Alignment::VERTICAL_CENTER,
-                ],
-            ];
-            $sheet->getStyle('A2:R' . $lastRow)->applyFromArray($dataStyle);
-
-            // Formatear columna de millas como número entero
-            $sheet->getStyle('J2:J' . $lastRow)
-                ->getNumberFormat()
-                ->setFormatCode(NumberFormat::FORMAT_NUMBER);
-
-            // Formatear columna de cantidad como número
-            $sheet->getStyle('M2:M' . $lastRow)
-                ->getNumberFormat()
-                ->setFormatCode(NumberFormat::FORMAT_NUMBER);
-
-            // Formatear columna de importe_total como número decimal (sin símbolo $)
-            $sheet->getStyle('N2:N' . $lastRow)
-                ->getNumberFormat()
-                ->setFormatCode('#,##0.00');
-
-            // Formatear columna de egreso_directo como número
-            $sheet->getStyle('P2:P' . $lastRow)
-                ->getNumberFormat()
-                ->setFormatCode(NumberFormat::FORMAT_NUMBER);
-
-            // Autoajustar columnas
-            foreach (range('A', 'R') as $column) {
-                $sheet->getColumnDimension($column)->setAutoSize(true);
-            }
-
-            // Congelar la fila de encabezados
-            $sheet->freezePane('A2');
-
-            // Crear hoja de referencia con IDs válidos
-            $referenceSheet = $spreadsheet->createSheet();
-            $referenceSheet->setTitle('Referencia de IDs');
-
-            // Establecer encabezados para la hoja de referencia
-            $referenceSheet->setCellValue('A1', 'Tabla');
-            $referenceSheet->setCellValue('B1', 'ID');
-            $referenceSheet->setCellValue('C1', 'Nombre/Descripción');
-
-            // Dar formato a los encabezados
-            $refHeaderStyle = [
-                'font' => [
-                    'bold' => true,
-                    'color' => ['rgb' => 'FFFFFF'],
-                ],
-                'fill' => [
-                    'fillType' => Fill::FILL_SOLID,
-                    'startColor' => ['rgb' => '70AD47'],
-                ],
-                'alignment' => [
-                    'horizontal' => Alignment::HORIZONTAL_CENTER,
-                ],
-                'borders' => [
-                    'allBorders' => [
-                        'borderStyle' => Border::BORDER_THIN,
-                        'color' => ['rgb' => '000000'],
-                    ],
-                ],
-            ];
-            $referenceSheet->getStyle('A1:C1')->applyFromArray($refHeaderStyle);
-
-            // Estilo para filas de datos
-            $refDataStyle = [
-                'borders' => [
-                    'allBorders' => [
-                        'borderStyle' => Border::BORDER_THIN,
-                        'color' => ['rgb' => 'D9D9D9'],
-                    ],
-                ],
-            ];
-
-            // Estilo para filas de categorías
-            $refCategoryStyle = [
-                'font' => [
-                    'bold' => true,
-                ],
-                'fill' => [
-                    'fillType' => Fill::FILL_SOLID,
-                    'startColor' => ['rgb' => 'E2EFDA'],
-                ],
-                'borders' => [
-                    'allBorders' => [
-                        'borderStyle' => Border::BORDER_THIN,
-                        'color' => ['rgb' => '000000'],
-                    ],
-                ],
-            ];
-
-            // Obtener datos de referencia de la base de datos
-            $row = 2;
-
-            // Negocios
-            $negocios = Business::all(['id', 'nombre']);
-            $referenceSheet->setCellValue('A' . $row, 'Negocios');
-            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refCategoryStyle);
-            $row++;
-            foreach ($negocios as $negocio) {
-                $referenceSheet->setCellValue('B' . $row, $negocio->id);
-                $referenceSheet->setCellValue('C' . $row, $negocio->nombre);
-                $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
-                $row++;
-            }
-            $row++; // Espacio entre tablas
-
-            // Métodos de pago
-            $metodos = PaymentMethod::all(['id', 'nombre']);
-            $referenceSheet->setCellValue('A' . $row, 'Métodos de Pago');
-            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refCategoryStyle);
-            $row++;
-            foreach ($metodos as $metodo) {
-                $referenceSheet->setCellValue('B' . $row, $metodo->id);
-                $referenceSheet->setCellValue('C' . $row, $metodo->nombre);
-                $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
-                $row++;
-            }
-            $row++; // Espacio entre tablas
-
-            // Categorías
-            $categorias = Category::all(['id', 'nombre']);
-            $referenceSheet->setCellValue('A' . $row, 'Categorías');
-            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refCategoryStyle);
-            $row++;
-            foreach ($categorias as $categoria) {
-                $referenceSheet->setCellValue('B' . $row, $categoria->id);
-                $referenceSheet->setCellValue('C' . $row, $categoria->nombre);
-                $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
-                $row++;
-            }
-            $row++; // Espacio entre tablas
-
-            // Vehículos
-            $vehiculos = Vehicle::all(['id', 'modelo', 'numero_placa']);
-            $referenceSheet->setCellValue('A' . $row, 'Vehículos');
-            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refCategoryStyle);
-            $row++;
-            foreach ($vehiculos as $vehiculo) {
-                $referenceSheet->setCellValue('B' . $row, $vehiculo->id);
-                $referenceSheet->setCellValue('C' . $row, $vehiculo->modelo . ' (' . $vehiculo->numero_placa . ')');
-                $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
-                $row++;
-            }
-            $row++; // Espacio entre tablas
-
-            // Estados de transacción
-            $estados = TransactionStates::all(['id', 'nombre']);
-            $referenceSheet->setCellValue('A' . $row, 'Estados de Transacción');
-            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refCategoryStyle);
-            $row++;
-            foreach ($estados as $estado) {
-                $referenceSheet->setCellValue('B' . $row, $estado->id);
-                $referenceSheet->setCellValue('C' . $row, $estado->nombre);
-                $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
-                $row++;
-            }
-            $row++; // Espacio entre tablas
-
-            // Cajas operativas
-            $cajasOperativas = OperatingBox::all(['id', 'nombre', 'saldo']);
-            $referenceSheet->setCellValue('A' . $row, 'Cajas Operativas');
-            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refCategoryStyle);
-            $row++;
-            foreach ($cajasOperativas as $caja) {
-                $referenceSheet->setCellValue('B' . $row, $caja->id);
-                // Formatear el saldo como número decimal (sin símbolo $)
-                $saldoFormateado = number_format($caja->saldo, 2, '.', ',');
-                $referenceSheet->setCellValue('C' . $row, $caja->nombre . ' (Saldo: ' . $saldoFormateado . ')');
-                $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
-                $row++;
-            }
-            $row++; // Espacio entre tablas
-
-            // Campo egreso_directo
-            $referenceSheet->setCellValue('A' . $row, 'Campo egreso_directo');
-            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refCategoryStyle);
-            $row++;
-            $referenceSheet->setCellValue('B' . $row, '1');
-            $referenceSheet->setCellValue('C' . $row, 'Egreso directo (true) - Solo para tipo "Egreso"');
-            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
-            $row++;
-            $referenceSheet->setCellValue('B' . $row, '0');
-            $referenceSheet->setCellValue('C' . $row, 'Egreso indirecto (false) - Solo para tipo "Egreso"');
-            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
-            $row++;
-            $referenceSheet->setCellValue('B' . $row, '');
-            $referenceSheet->setCellValue('C' . $row, 'Dejar vacío para tipo "Ingreso"');
-            $referenceSheet->getStyle('A' . $row . ':C' . $row)->applyFromArray($refDataStyle);
-            $row++;
-
-            // Autoajustar columnas en la hoja de referencia
-            foreach (range('A', 'C') as $column) {
-                $referenceSheet->getColumnDimension($column)->setAutoSize(true);
-            }
-
-            // Congelar la fila de encabezados
-            $referenceSheet->freezePane('A2');
-
-            // Crear hoja de instrucciones
-            $instructionSheet = $spreadsheet->createSheet();
-            $instructionSheet->setTitle('Instrucciones');
-
-            // Agregar instrucciones
-            $instructions = [
-                'Instrucciones para importar transacciones financieras:',
-                '',
-                '1. Complete la hoja "Plantilla de Importación" con los datos de las transacciones.',
-                '2. Para los campos que requieren IDs (negocio_id, metodo_id, etc.), consulte la hoja "Referencia de IDs".',
-                '3. El campo "vehicle_id" es opcional, puede dejarlo vacío si no aplica.',
-                '4. El campo "egreso_directo" es obligatorio solo cuando "tipo_de_transaccion" es "Egreso".',
-                '   - Use 1 para egresos directos (true)',
-                '   - Use 0 para egresos indirectos (false)',
-                '   - Para transacciones de tipo "Ingreso", deje este campo vacío.',
-                '5. El campo "numero_transaccion" es opcional. Si no se proporciona, se generará automáticamente.',
-                '6. El campo "fecha" debe tener formato YYYY-MM-DD (por ejemplo: 2025-05-23).',
-                '   IMPORTANTE: La columna de fecha está configurada como TEXTO para evitar que Excel la modifique.',
-                '   SIEMPRE escriba las fechas en formato YYYY-MM-DD.',
-                '7. Una vez completados los datos, guarde el archivo y súbalo al sistema.',
-                '',
-                '⚠️ ADVERTENCIA CRÍTICA SOBRE FECHAS ⚠️',
-                '',
-                'PROBLEMA COMÚN: Excel cambia automáticamente el formato de las fechas sin su consentimiento.',
-                'SOLUCIÓN:',
-                '',
-                '1. NUNCA cambie el formato de la columna de fecha a "Fecha" de Excel.',
-                '2. Si Excel muestra un número (ej: 45678) en lugar de la fecha, significa que la cambió a formato numérico.',
-                '3. Para corregir: haga clic derecho en la celda > Formato de celdas > Texto, luego escriba la fecha como texto.',
-                '4. Use SIEMPRE el formato YYYY-MM-DD (ej: 2025-05-23, 2025-12-31, 2025-01-15).',
-                '',
-                'TÉCNICAS PARA EVITAR QUE EXCEL CAMBIE LAS FECHAS:',
-                '',
-                'Técnica 1: Escriba un apóstrofo antes de la fecha: \'2025-05-23',
-                'Técnica 2: Copie la fecha desde un editor de texto y péguela en Excel.',
-                'Técnica 3: Si Excel insiste en cambiar el formato, deshaga el cambio (Ctrl+Z) inmediatamente.',
-                'Técnica 4: Si ve que la fecha cambió (ej: 23/5/2025), cámbiela de vuelta a YYYY-MM-DD (2025-05-23).',
-                '',
-                'Notas importantes generales:',
-                '- Los IDs deben coincidir exactamente con los listados en la hoja de referencia.',
-                '- Verifique que los tipos de transacción sean "Ingreso" o "Egreso" (con mayúscula inicial).',
-                '- Asegúrese de que los montos sean números positivos.',
-                '- No modifique los encabezados de las columnas.',
-                '- El campo egreso_directo solo aplica para transacciones de tipo "Egreso".',
-                '- El campo "caja_operativa_id" es opcional.',
-                '',
-                '¿Qué pasa si no sigo estas instrucciones?',
-                '- Si ingresa una fecha en formato incorrecto, la importación fallará.',
-                '- Si Excel cambia el formato de la fecha, la importación fallará.',
-                '- Si la fecha no está en formato YYYY-MM-DD, la importación fallará.',
-                '',
-                'Recuerde: El sistema necesita fechas en formato YYYY-MM-DD para funcionar correctamente.'
-            ];
-
-            // Agregar instrucciones a la hoja
-            foreach ($instructions as $index => $instruction) {
-                $instructionSheet->setCellValue('A' . ($index + 1), $instruction);
-            }
-
-            // Estilo para instrucciones
-            $instructionTitleStyle = [
-                'font' => [
-                    'bold' => true,
-                    'size' => 16,
-                    'color' => ['rgb' => '4472C4'],
-                ],
-            ];
-            $instructionSheet->getStyle('A1')->applyFromArray($instructionTitleStyle);
-
-            $instructionSectionStyle = [
-                'font' => [
-                    'bold' => true,
-                    'size' => 14,
-                    'color' => ['rgb' => '70AD47'],
-                ],
-            ];
-            $instructionSheet->getStyle('A15')->applyFromArray($instructionSectionStyle);
-            $instructionSheet->getStyle('A23')->applyFromArray($instructionSectionStyle);
-            $instructionSheet->getStyle('A32')->applyFromArray($instructionSectionStyle);
-
-            // Estilo para celdas de instrucciones
-            $instructionCellStyle = [
-                'alignment' => [
-                    'vertical' => Alignment::VERTICAL_TOP,
-                    'wrapText' => true,
-                ],
-            ];
-            $instructionSheet->getStyle('A1:A' . count($instructions))->applyFromArray($instructionCellStyle);
-
-            // Autoajustar columnas en la hoja de instrucciones
-            $instructionSheet->getColumnDimension('A')->setWidth(120);
-
-            // Establecer la hoja de plantilla como activa por defecto
-            $spreadsheet->setActiveSheetIndex(0);
-
-            // Crear escritor
-            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
-
-            // Guardar en un archivo temporal
-            $fileName = 'plantilla_transacciones_financieras.xlsx';
-            $tempFile = tempnam(sys_get_temp_dir(), $fileName);
-            $writer->save($tempFile);
-
-            // Devolver el archivo como descarga
-            return response()->download($tempFile, $fileName, [
-                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                'Content-Disposition' => 'attachment; filename="' . $fileName . '"',
-            ])->deleteFileAfterSend(true);
-        } catch (\Exception $e) {
-            return response()->json([
-                'error' => 'Error al generar la plantilla: ' . $e->getMessage()
-            ], 500);
-        }
-    }
-}
 /**
  * Importar transacciones financieras desde un archivo Excel
  */

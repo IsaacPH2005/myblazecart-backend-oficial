@@ -72,19 +72,9 @@ class FinancialTransactionsExport implements
             $query->where('estado_de_transaccion_id', $this->request->estado);
         }
 
-        if ($this->request->has('egreso_directo') && $this->request->has('tipo') && $this->request->tipo === 'Egreso') {
-            $egresoDirectoValue = $this->request->egreso_directo;
-            if ($egresoDirectoValue === 'true' || $egresoDirectoValue === 1 || $egresoDirectoValue === '1') {
-                $egresoDirecto = true;
-            } elseif ($egresoDirectoValue === 'false' || $egresoDirectoValue === 0 || $egresoDirectoValue === '0') {
-                $egresoDirecto = false;
-            } else {
-                $egresoDirecto = null;
-            }
-
-            if ($egresoDirecto !== null) {
-                $query->where('egreso_directo', $egresoDirecto);
-            }
+        // Filtro por subcategoría
+        if ($this->request->has('subcategoria')) {
+            $query->where('subcategoria', $this->request->subcategoria);
         }
 
         if ($this->request->has('fecha_desde') && $this->request->fecha_desde) {
@@ -126,8 +116,8 @@ class FinancialTransactionsExport implements
             'IMPORTE TOTAL',
             'MÉTODO DE PAGO',
             'CATEGORÍA',
+            'SUBCATEGORÍA',
             'CLIENTE/PROVEEDOR',
-            'EGRESO DIRECTO',
             'ESTADO',
             'OBSERVACIONES',
             'ARCHIVO ADJUNTO'
@@ -153,8 +143,8 @@ class FinancialTransactionsExport implements
             $transaction->importe_total ?: 0,
             $transaction->metodo ? $transaction->metodo->nombre : 'N/A',
             $transaction->categoria ? $transaction->categoria->nombre : 'N/A',
+            $transaction->subcategoria ?: 'N/A', // Mostrar subcategoría
             $transaction->cliente_proveedor ?: 'N/A',
-            $this->getEgresoDirectoText($transaction->egreso_directo),
             $this->getEstadoWithIcon($transaction->estadoDeTransaccion),
             $transaction->observaciones ?: '',
             $archivoUrl ?: 'Sin archivo'
@@ -267,12 +257,6 @@ class FinancialTransactionsExport implements
             default:
                 return $tipo ?: 'N/A';
         }
-    }
-
-    private function getEgresoDirectoText($egresoDirecto)
-    {
-        if ($egresoDirecto === null) return 'N/A';
-        return $egresoDirecto ? 'Directo' : 'Indirecto';
     }
 
     private function getUserFullName($transaction)

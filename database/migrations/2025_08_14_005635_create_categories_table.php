@@ -14,6 +14,10 @@ return new class extends Migration
         Schema::create('categories', function (Blueprint $table) {
             $table->id();
             $table->string('nombre');
+            $table->string('codigo');
+            $table->string('clasificacion');
+            $table->string('subcategoria');
+            $table->string('agrupacion');
             $table->string('descripcion')->nullable()->comment('Descripción de la categoría');
             $table->boolean('estado')->default(true);
             $table->timestamps();

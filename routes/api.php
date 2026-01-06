@@ -273,6 +273,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/operating-boxes/{id}/delete-permanent', [OperatingBoxController::class, 'deletePermanent']);
 
         Route::apiResource('categories', CategoryController::class);
+        Route::post('/categories-excel/import', [CategoryController::class, 'import']);
+        Route::get('/categories-excel/template', [CategoryController::class, 'descargarPlantilla']);
         Route::get('/categories/activas', [CategoryController::class, 'activas']);
         Route::post('/categories/{id}/activate', [CategoryController::class, 'activate']);
 

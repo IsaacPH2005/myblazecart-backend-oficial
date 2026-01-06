@@ -24,12 +24,12 @@ class FinancialTransactions extends Model
         'cantidad',
         'importe_total',
         'cliente_proveedor',
-        'egreso_directo',
+        'subcategoria',
         'observaciones',
         'estado',
         'numero_transaccion',
         'monto_excedido',
-        'caja_operativa_id'
+        'caja_operativa_id',
     ];
 
     // En tu modelo FinancialTransactions
