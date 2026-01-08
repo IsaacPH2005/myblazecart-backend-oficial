@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\api\TransactionFinancial;
 
 use App\Exports\FinancialTransactionsExport;
+use App\Exports\FiscalTransactionsExport;
 use App\Http\Controllers\Controller;
 use App\Models\FinancialTransactions;
 use App\Models\MovementsBox;
@@ -1409,7 +1410,23 @@ class FinancialTransactionController extends Controller
             ], 500);
         }
     }
-
+    public function exportFiscal(Request $request)
+    {
+        try {
+            $fileName = 'reporte_fiscal_transacciones_' . date('Y-m-d_H-i-s') . '.xlsx';
+            return Excel::download(
+                new FiscalTransactionsExport($request),
+                $fileName
+            );
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al exportar los datos fiscales',
+                'details' => 'Ha ocurrido un error al generar el archivo Excel fiscal. Por favor, inténtelo de nuevo más tarde.',
+                'technical_error' => $e->getMessage()
+            ], 500);
+        }
+    }
     // Función auxiliar para limpiar nombres
     private function limpiarNombre($nombre)
     {

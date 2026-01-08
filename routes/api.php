@@ -256,6 +256,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/operation-summary', [DatosRelevantesController::class, 'getOperationSummary']);
             Route::post('/daily-productivity', [DatosRelevantesController::class, 'getDailyProductivity']);
             Route::post('/export-excel', [DatosRelevantesController::class, 'exportToExcel']);
+            Route::post('/export-excel-fiscal', [FinancialTransactionController::class, 'exportFiscal']);
         });
 
 
