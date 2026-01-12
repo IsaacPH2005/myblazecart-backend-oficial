@@ -69,4 +69,11 @@ class User extends Authenticatable
     {
         return $this->hasMany(PendingPayment::class);
     }
+    /**
+     * Inversiones realizadas por el usuario
+     */
+    public function investments()
+    {
+        return $this->hasMany(Investment::class);
+    }
 }

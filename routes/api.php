@@ -5,6 +5,9 @@ use App\Http\Controllers\api\BusinessController;
 use App\Http\Controllers\api\CategoryController;
 use App\Http\Controllers\api\Driver\DriverController;
 use App\Http\Controllers\api\Driver\DriverDocumentController;
+use App\Http\Controllers\api\investments\InvestmentController;
+use App\Http\Controllers\api\investments\InvestorDashboardController;
+use App\Http\Controllers\api\investments\VehicleFinancialController;
 use App\Http\Controllers\api\MovementBox\MovementBoxController;
 use App\Http\Controllers\api\OperatingBox\OperatingBoxController;
 use App\Http\Controllers\api\OperatingBox\OperatingBoxHistoryController;
@@ -77,6 +80,22 @@ Route::middleware('auth:sanctum')->group(function () {
     |
     */
     Route::middleware(['admin'])->group(function () {
+        Route::prefix('investments')->group(function () {
+            Route::get('/', [InvestmentController::class, 'index']);
+            Route::get('/create', [InvestmentController::class, 'create']);
+            Route::get('/statistics', [InvestmentController::class, 'statistics']);
+            Route::post('/', [InvestmentController::class, 'store']);
+            Route::get('/{id}', [InvestmentController::class, 'show']);
+            Route::put('/{id}', [InvestmentController::class, 'update']);
+            Route::delete('/{id}', [InvestmentController::class, 'destroy']);
+
+            Route::get('/user/{userId}', [InvestmentController::class, 'byUser']);
+            Route::get('/business/{businessId}', [InvestmentController::class, 'byBusiness']);
+            Route::get('/vehicle/{vehicleId}', [InvestmentController::class, 'byVehicle']);
+            Route::patch('/{id}/status', [InvestmentController::class, 'changeStatus']);
+            Route::patch('/{id}/toggle-active', [InvestmentController::class, 'toggleActive']);
+        });
+
         Route::prefix('users')->group(function () {
             // Ruta para obtener usuarios que no son conductores
             Route::get('/not-drivers', [DriverController::class, 'getUsersNotDrivers']);
@@ -338,6 +357,24 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/state-actives-driver', [PaymentMethodController::class, 'paymentMethodsActives']);
         });
     });
+    Route::middleware(['auth:sanctum', 'inversionista'])->group(function () {
+
+        // Dashboard y datos principales del inversionista
+        Route::get('/dashboard', [InvestorDashboardController::class, 'index']);
+        Route::get('/investments', [InvestorDashboardController::class, 'myInvestments']);
+        Route::get('/businesses', [InvestorDashboardController::class, 'myBusinesses']);
+        Route::get('/businesses/{businessId}/details', [InvestorDashboardController::class, 'businessDetails']);
+        Route::get('/businesses/{businessId}/financial-statement', [InvestorDashboardController::class, 'businessFinancialStatement']);
+        Route::get('/businesses/{businessId}/transactions', [InvestorDashboardController::class, 'businessTransactions']);
+
+        // Vehículos financieros para inversionista
+        Route::get('/vehicles-financial/business', [VehicleFinancialController::class, 'getVehiclesFinancialStatementByBusiness']);
+        Route::get('/vehicles-financial/vehicle', [VehicleFinancialController::class, 'getVehicleFinancialStatement']);
+        Route::get('/vehicles-financial/vehicle/{vehicleId}/transactions', [VehicleFinancialController::class, 'getVehicleTransactions']);
+        Route::get('/vehicles-financial/performance-summary', [VehicleFinancialController::class, 'getVehiclesPerformanceSummary']);
+        Route::get('/vehicles-financial/export/excel', [VehicleFinancialController::class, 'exportToExcel']);
+        Route::get('/vehicles-financial/export/pdf', [VehicleFinancialController::class, 'exportToPDF']);
+    });
 
     /*
     |--------------------------------------------------------------------------
@@ -360,6 +397,7 @@ Route::middleware('auth:sanctum')->group(function () {
         });
     });
 });
+
 
 /*
 |--------------------------------------------------------------------------

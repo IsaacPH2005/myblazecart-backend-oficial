@@ -14,6 +14,14 @@ class Business extends Model
         'descripcion',
         'estado',
     ];
+    /**
+     * Inversiones asociadas al negocio
+     */
+    public function investments()
+    {
+        return $this->hasMany(Investment::class);
+    }
+
     // Una caja operativa tiene muchas categorías
     public function vehicles()
     {

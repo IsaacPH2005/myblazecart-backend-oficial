@@ -32,6 +32,13 @@ class Vehicle extends Model
         'observaciones',
         'foto'
     ];
+    /**
+     * Inversiones asociadas al vehículo
+     */
+    public function investments()
+    {
+        return $this->hasMany(Investment::class);
+    }
     public function user()
     {
         return $this->belongsTo(User::class);

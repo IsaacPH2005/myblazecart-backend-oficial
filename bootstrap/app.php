@@ -28,6 +28,7 @@ return Application::configure(basePath: dirname(__DIR__))
             // Middlewares personalizados
             'admin' => \App\Http\Middleware\AdminMiddleware::class,
             'carrier' => \App\Http\Middleware\CarrierMiddleware::class,
+            'inversionista' => \App\Http\Middleware\InvestorMiddleware::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
