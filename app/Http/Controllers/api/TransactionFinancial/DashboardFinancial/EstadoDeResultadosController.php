@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Business;
 use App\Models\FinancialTransactions;
 use App\Models\OperatingBox;
+use App\Models\Vehicle;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -20,26 +21,37 @@ use Carbon\Carbon;
 class EstadoDeResultadosController extends Controller
 {
     /**
-     * Obtener estado de resultados global (negocio + cajas operativas) en rango de fechas
+     * ============================================================================
+     * ESTADO FINANCIERO GLOBAL CON FILTRO OPCIONAL POR VEHÍCULO
+     * ============================================================================
      *
-     * REGLA DE NEGOCIO GLOBAL:
-     * - INGRESOS GLOBALES: Solo se cuentan los que NO tienen caja_operativa_id (evita duplicar movimientos internos de recargas a cajas).
-     * - EGRESOS GLOBALES: Se cuentan TODOS (incluye los de caja operativa, son gastos reales del negocio).
-     * - CAJAS OPERATIVAS: Se calculan por separado sus recargas (ingresos a caja) y subtracciones (egresos de caja) para auditoría interna.
-     * - BALANCE GLOBAL: Ingresos globales - Egresos globales (cajas afectan solo egresos si son gastos, pero recargas no se suman a ingresos globales).
-     * - Se considera el saldo actual de las cajas para comparación y auditoría.
-     * - DETALLE POR CAJA: Incluye desglose por estados de transacción (pagado, por pagar, etc.) para recargas y subtracciones específicas de cada caja.
+     * Este método maneja DOS casos:
+     * 1. Estado financiero GLOBAL del negocio (cuando NO se envía vehicle_id)
+     * 2. Estado financiero POR VEHÍCULO (cuando SÍ se envía vehicle_id)
+     *
+     * PARÁMETROS:
+     * - negocio_id: ID del negocio (obligatorio)
+     * - vehicle_id: ID del vehículo (opcional - para filtrar por vehículo)
+     * - fecha_inicial: Fecha de inicio (obligatorio)
+     * - fecha_final: Fecha de fin (obligatorio)
+     *
+     * REGLA DE NEGOCIO:
+     * - INGRESOS: Solo los que NO tienen caja_operativa_id
+     * - EGRESOS: TODOS (incluye los de caja operativa)
+     * - CATEGORÍAS: Solo se muestran las que tienen movimiento (transacciones > 0 y monto > 0)
      */
     public function getFinancialStatementByDateRange(Request $request): JsonResponse
     {
         // ============== VALIDACIÓN DE PARÁMETROS ==============
         $validator = Validator::make($request->all(), [
             'negocio_id' => ['required', 'exists:businesses,id'],
+            'vehicle_id' => ['nullable', 'exists:vehicles,id'], // OPCIONAL: filtro por vehículo
             'fecha_inicial' => 'required|date',
             'fecha_final' => 'required|date|after_or_equal:fecha_inicial',
         ], [
             'negocio_id.required' => 'El ID del negocio es obligatorio',
             'negocio_id.exists' => 'El negocio seleccionado no existe',
+            'vehicle_id.exists' => 'El vehículo seleccionado no existe',
             'fecha_inicial.required' => 'La fecha inicial es obligatoria',
             'fecha_inicial.date' => 'La fecha inicial debe ser una fecha válida',
             'fecha_final.required' => 'La fecha final es obligatoria',
@@ -56,226 +68,233 @@ class EstadoDeResultadosController extends Controller
         }
 
         $negocioId = $request->negocio_id;
+        $vehicleId = $request->vehicle_id; // PUEDE SER NULL
         $fechaInicial = $request->fecha_inicial;
         $fechaFinal = $request->fecha_final;
 
         try {
             // ============== INFORMACIÓN DEL NEGOCIO ==============
             $negocio = Business::findOrFail($negocioId);
-            Log::info('Procesando estado financiero global para negocio', [
+
+            // ============== INFORMACIÓN DEL VEHÍCULO (SI SE FILTRA) ==============
+            $vehicle = null;
+            $esFiltradoPorVehiculo = !is_null($vehicleId);
+
+            if ($esFiltradoPorVehiculo) {
+                $vehicle = Vehicle::findOrFail($vehicleId);
+
+                // Verificar que el vehículo pertenece al negocio
+                if ($vehicle->negocio_id != $negocioId) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'El vehículo no pertenece al negocio seleccionado'
+                    ], 400);
+                }
+            }
+
+            Log::info('Procesando estado financiero', [
                 'negocio_id' => $negocioId,
-                'negocio_nombre' => $negocio->nombre,
+                'vehicle_id' => $vehicleId,
+                'filtrado_por_vehiculo' => $esFiltradoPorVehiculo,
                 'fecha_rango' => [$fechaInicial, $fechaFinal]
             ]);
 
-            // ============== CALCULAR TOTALES GLOBALES DEL NEGOCIO ==============
-            // Ingresos: Solo sin caja operativa (movimientos directos del negocio)
-            $totalIngresosBrutos = FinancialTransactions::where('negocio_id', $negocioId)
+            // ============== CALCULAR TOTALES (CON O SIN FILTRO DE VEHÍCULO) ==============
+            // Query base para ingresos
+            $queryIngresos = FinancialTransactions::where('negocio_id', $negocioId)
                 ->where('tipo_de_transaccion', 'Ingreso')
-                ->whereNull('caja_operativa_id') // EXCLUIR ingresos de caja operativa (recargas internas)
-                ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-                ->sum('importe_total');
+                ->whereNull('caja_operativa_id')
+                ->whereBetween('fecha', [$fechaInicial, $fechaFinal]);
 
-            // Egresos: TODOS (incluye egresos directos del negocio y de cajas operativas)
-            $totalEgresosBrutos = FinancialTransactions::where('negocio_id', $negocioId)
+            // Query base para egresos
+            $queryEgresos = FinancialTransactions::where('negocio_id', $negocioId)
                 ->where('tipo_de_transaccion', 'Egreso')
-                // NO SE EXCLUYE caja_operativa_id - Se incluyen TODOS los egresos reales
-                ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-                ->sum('importe_total');
+                ->whereBetween('fecha', [$fechaInicial, $fechaFinal]);
+
+            // Si hay filtro por vehículo, aplicarlo a ambas queries
+            if ($esFiltradoPorVehiculo) {
+                $queryIngresos->where('vehicle_id', $vehicleId);
+                $queryEgresos->where('vehicle_id', $vehicleId);
+            }
+
+            $totalIngresosBrutos = $queryIngresos->sum('importe_total');
+            $totalEgresosBrutos = $queryEgresos->sum('importe_total');
 
             $margenBruto = $totalIngresosBrutos - $totalEgresosBrutos;
-
-            // Margen Util Antes de Impuestos (establecido en 0, sin deducciones)
             $margenUtilAntesImpuestos = 0;
             $impuestosEstimados = 0;
             $costosFijosAdicionales = 0;
 
-            // Rentabilidad basada solo en margen bruto (sin considerar util antes de impuestos)
             $rentabilidadPorcentaje = $totalIngresosBrutos > 0
                 ? ($margenBruto / $totalIngresosBrutos) * 100
                 : 0;
 
-            Log::info('Totales globales calculados', [
-                'negocio_id' => $negocioId,
-                'total_ingresos_brutos' => $totalIngresosBrutos,
-                'total_egresos_brutos' => $totalEgresosBrutos,
-                'margen_bruto' => $margenBruto,
-                'margen_util_antes_impuestos' => $margenUtilAntesImpuestos
-            ]);
-
-            // ============== OBTENER CAJAS OPERATIVAS CON TRANSACCIONES ==============
-            // Solo cajas que tengan transacciones en el período (para auditoría interna)
-            $cajasConTransacciones = FinancialTransactions::where('negocio_id', $negocioId)
-                ->whereNotNull('caja_operativa_id')
-                ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-                ->select('caja_operativa_id')
-                ->distinct()
-                ->pluck('caja_operativa_id');
-
-            $cajasOperativas = OperatingBox::whereIn('id', $cajasConTransacciones)
-                ->where('estado', true) // Solo cajas activas
-                ->get();
-
-            // ============== CALCULAR ESTADO POR CAJA OPERATIVA (AUDITORÍA INTERNA CON DETALLE POR ESTADO) ==============
+            // ============== CAJAS OPERATIVAS (SOLO SI NO HAY FILTRO DE VEHÍCULO) ==============
             $estadoPorCaja = [];
             $totalesGlobalesCajas = [
-                'total_ingresos_cajas' => 0, // Recargas a cajas (no afectan ingresos globales)
-                'total_egresos_cajas' => 0,  // Subtracciones de cajas (ya incluidos en egresos globales)
-                'balance_global_cajas' => 0  // Neto de movimientos en cajas (para control interno)
+                'total_ingresos_cajas' => 0,
+                'total_egresos_cajas' => 0,
+                'balance_global_cajas' => 0
             ];
+            $distribucionCajasPorBalance = collect([]);
 
-            foreach ($cajasOperativas as $caja) {
-                // Totales generales por caja (recargas y subtracciones)
-                $ingresosCaja = FinancialTransactions::where('negocio_id', $negocioId)
-                    ->where('caja_operativa_id', $caja->id)
-                    ->where('tipo_de_transaccion', 'Ingreso')
+            // Solo calcular cajas si NO hay filtro de vehículo
+            if (!$esFiltradoPorVehiculo) {
+                $cajasConTransacciones = FinancialTransactions::where('negocio_id', $negocioId)
+                    ->whereNotNull('caja_operativa_id')
                     ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-                    ->sum('importe_total');
+                    ->select('caja_operativa_id')
+                    ->distinct()
+                    ->pluck('caja_operativa_id');
 
-                $egresosCaja = FinancialTransactions::where('negocio_id', $negocioId)
-                    ->where('caja_operativa_id', $caja->id)
-                    ->where('tipo_de_transaccion', 'Egreso')
-                    ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-                    ->sum('importe_total');
-
-                $balanceCaja = $ingresosCaja - $egresosCaja;
-
-                // Contar transacciones totales por caja
-                $totalTransaccionesIngresos = FinancialTransactions::where('negocio_id', $negocioId)
-                    ->where('caja_operativa_id', $caja->id)
-                    ->where('tipo_de_transaccion', 'Ingreso')
-                    ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-                    ->count();
-
-                $totalTransaccionesEgresos = FinancialTransactions::where('negocio_id', $negocioId)
-                    ->where('caja_operativa_id', $caja->id)
-                    ->where('tipo_de_transaccion', 'Egreso')
-                    ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-                    ->count();
-
-                // ============== DETALLE POR ESTADO PARA ESTA CAJA ==============
-                // Transacciones específicas de la caja (ingresos y egresos con caja_operativa_id)
-                $transaccionesPorEstadoCaja = FinancialTransactions::where('negocio_id', $negocioId)
-                    ->where('caja_operativa_id', $caja->id)
-                    ->where(function ($query) {
-                        // Ingresos (recargas) de la caja
-                        $query->where('tipo_de_transaccion', 'Ingreso')
-                            // O egresos (subtracciones) de la caja
-                            ->orWhere('tipo_de_transaccion', 'Egreso');
-                    })
-                    ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-                    ->join('transaction_states', 'financial_transactions.estado_de_transaccion_id', '=', 'transaction_states.id')
-                    ->select(
-                        'transaction_states.id as estado_id',
-                        'transaction_states.nombre as estado_nombre',
-                        'transaction_states.descripcion as estado_descripcion',
-                        'financial_transactions.tipo_de_transaccion',
-                        DB::raw('COUNT(*) as total_transacciones'),
-                        DB::raw('SUM(importe_total) as total_importe')
-                    )
-                    ->groupBy(
-                        'transaction_states.id',
-                        'transaction_states.nombre',
-                        'transaction_states.descripcion',
-                        'financial_transactions.tipo_de_transaccion'
-                    )
+                $cajasOperativas = OperatingBox::whereIn('id', $cajasConTransacciones)
+                    ->where('estado', true)
                     ->get();
 
-                // Organizar por estado para esta caja
-                $estadosPorCaja = [];
-                foreach ($transaccionesPorEstadoCaja as $transaccion) {
-                    $estadoId = $transaccion->estado_id;
-                    $estadoNombre = strtoupper($transaccion->estado_nombre);
-                    $tipo = $transaccion->tipo_de_transaccion;
+                foreach ($cajasOperativas as $caja) {
+                    $ingresosCaja = FinancialTransactions::where('negocio_id', $negocioId)
+                        ->where('caja_operativa_id', $caja->id)
+                        ->where('tipo_de_transaccion', 'Ingreso')
+                        ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
+                        ->sum('importe_total');
 
-                    if (!isset($estadosPorCaja[$estadoId])) {
-                        $estadosPorCaja[$estadoId] = [
-                            'estado_id' => $estadoId,
-                            'estado_nombre' => $estadoNombre,
-                            'estado_descripcion' => $transaccion->estado_descripcion,
-                            'ingresos_recargas' => 0, // Específico: recargas pagadas/por pagar
-                            'egresos_subtracciones' => 0, // Específico: subtracciones pagadas/por pagar
-                            'total_transacciones_recargas' => 0,
-                            'total_transacciones_subtracciones' => 0,
-                            'balance_estado_caja' => 0
-                        ];
+                    $egresosCaja = FinancialTransactions::where('negocio_id', $negocioId)
+                        ->where('caja_operativa_id', $caja->id)
+                        ->where('tipo_de_transaccion', 'Egreso')
+                        ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
+                        ->sum('importe_total');
+
+                    $balanceCaja = $ingresosCaja - $egresosCaja;
+
+                    $totalTransaccionesIngresos = FinancialTransactions::where('negocio_id', $negocioId)
+                        ->where('caja_operativa_id', $caja->id)
+                        ->where('tipo_de_transaccion', 'Ingreso')
+                        ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
+                        ->count();
+
+                    $totalTransaccionesEgresos = FinancialTransactions::where('negocio_id', $negocioId)
+                        ->where('caja_operativa_id', $caja->id)
+                        ->where('tipo_de_transaccion', 'Egreso')
+                        ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
+                        ->count();
+
+                    // Detalle por estado para esta caja
+                    $transaccionesPorEstadoCaja = FinancialTransactions::where('negocio_id', $negocioId)
+                        ->where('caja_operativa_id', $caja->id)
+                        ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
+                        ->join('transaction_states', 'financial_transactions.estado_de_transaccion_id', '=', 'transaction_states.id')
+                        ->select(
+                            'transaction_states.id as estado_id',
+                            'transaction_states.nombre as estado_nombre',
+                            'transaction_states.descripcion as estado_descripcion',
+                            'financial_transactions.tipo_de_transaccion',
+                            DB::raw('COUNT(*) as total_transacciones'),
+                            DB::raw('SUM(importe_total) as total_importe')
+                        )
+                        ->groupBy(
+                            'transaction_states.id',
+                            'transaction_states.nombre',
+                            'transaction_states.descripcion',
+                            'financial_transactions.tipo_de_transaccion'
+                        )
+                        ->get();
+
+                    $estadosPorCaja = [];
+                    foreach ($transaccionesPorEstadoCaja as $transaccion) {
+                        $estadoId = $transaccion->estado_id;
+                        $estadoNombre = strtoupper($transaccion->estado_nombre);
+                        $tipo = $transaccion->tipo_de_transaccion;
+
+                        if (!isset($estadosPorCaja[$estadoId])) {
+                            $estadosPorCaja[$estadoId] = [
+                                'estado_id' => $estadoId,
+                                'estado_nombre' => $estadoNombre,
+                                'estado_descripcion' => $transaccion->estado_descripcion,
+                                'ingresos_recargas' => 0,
+                                'egresos_subtracciones' => 0,
+                                'total_transacciones_recargas' => 0,
+                                'total_transacciones_subtracciones' => 0,
+                                'balance_estado_caja' => 0
+                            ];
+                        }
+
+                        if ($tipo === 'Ingreso') {
+                            $estadosPorCaja[$estadoId]['ingresos_recargas'] = floatval($transaccion->total_importe);
+                            $estadosPorCaja[$estadoId]['total_transacciones_recargas'] = intval($transaccion->total_transacciones);
+                        } else {
+                            $estadosPorCaja[$estadoId]['egresos_subtracciones'] = floatval($transaccion->total_importe);
+                            $estadosPorCaja[$estadoId]['total_transacciones_subtracciones'] = intval($transaccion->total_transacciones);
+                        }
+
+                        $estadosPorCaja[$estadoId]['balance_estado_caja'] =
+                            $estadosPorCaja[$estadoId]['ingresos_recargas'] - $estadosPorCaja[$estadoId]['egresos_subtracciones'];
                     }
 
-                    if ($tipo === 'Ingreso') {
-                        $estadosPorCaja[$estadoId]['ingresos_recargas'] = floatval($transaccion->total_importe);
-                        $estadosPorCaja[$estadoId]['total_transacciones_recargas'] = intval($transaccion->total_transacciones);
-                    } else {
-                        $estadosPorCaja[$estadoId]['egresos_subtracciones'] = floatval($transaccion->total_importe);
-                        $estadosPorCaja[$estadoId]['total_transacciones_subtracciones'] = intval($transaccion->total_transacciones);
-                    }
+                    $promedioIngreso = $totalTransaccionesIngresos > 0 ? $ingresosCaja / $totalTransaccionesIngresos : 0;
+                    $promedioEgreso = $totalTransaccionesEgresos > 0 ? $egresosCaja / $totalTransaccionesEgresos : 0;
 
-                    $estadosPorCaja[$estadoId]['balance_estado_caja'] =
-                        $estadosPorCaja[$estadoId]['ingresos_recargas'] - $estadosPorCaja[$estadoId]['egresos_subtracciones'];
+                    $estadoPorCaja[] = [
+                        'caja_operativa' => [
+                            'id' => $caja->id,
+                            'nombre' => strtoupper($caja->nombre),
+                            'descripcion' => $caja->descripcion ?? 'Sin descripción',
+                            'saldo_actual' => floatval($caja->saldo),
+                        ],
+                        'periodo' => [
+                            'ingresos_recargas' => floatval($ingresosCaja),
+                            'egresos_subtracciones' => floatval($egresosCaja),
+                            'balance_periodo' => floatval($balanceCaja),
+                        ],
+                        'transacciones_totales' => [
+                            'total_recargas' => intval($totalTransaccionesIngresos),
+                            'total_subtracciones' => intval($totalTransaccionesEgresos),
+                            'total_transacciones_caja' => intval($totalTransaccionesIngresos + $totalTransaccionesEgresos),
+                        ],
+                        'promedios' => [
+                            'promedio_recarga' => round($promedioIngreso, 2),
+                            'promedio_subtraccion' => round($promedioEgreso, 2),
+                        ],
+                        'rentabilidad_caja' => $ingresosCaja > 0 ? round((($ingresosCaja - $egresosCaja) / $ingresosCaja) * 100, 2) : 0,
+                        'diferencia_saldo' => floatval($caja->saldo - $balanceCaja),
+                        'detalle_por_estado' => array_values($estadosPorCaja),
+                    ];
+
+                    $totalesGlobalesCajas['total_ingresos_cajas'] += $ingresosCaja;
+                    $totalesGlobalesCajas['total_egresos_cajas'] += $egresosCaja;
+                    $totalesGlobalesCajas['balance_global_cajas'] += $balanceCaja;
                 }
 
-                // Promedios para cajas
-                $promedioIngreso = $totalTransaccionesIngresos > 0 ? $ingresosCaja / $totalTransaccionesIngresos : 0;
-                $promedioEgreso = $totalTransaccionesEgresos > 0 ? $egresosCaja / $totalTransaccionesEgresos : 0;
-
-                $estadoPorCaja[] = [
-                    'caja_operativa' => [
-                        'id' => $caja->id,
-                        'nombre' => strtoupper($caja->nombre),
-                        'descripcion' => $caja->descripcion ?? 'Sin descripción',
-                        'saldo_actual' => floatval($caja->saldo), // Saldo actual en BD
-                    ],
-                    'periodo' => [
-                        'ingresos_recargas' => floatval($ingresosCaja), // Recargas totales
-                        'egresos_subtracciones' => floatval($egresosCaja),   // Subtracciones totales
-                        'balance_periodo' => floatval($balanceCaja), // Neto interno de caja
-                    ],
-                    'transacciones_totales' => [
-                        'total_recargas' => intval($totalTransaccionesIngresos),
-                        'total_subtracciones' => intval($totalTransaccionesEgresos),
-                        'total_transacciones_caja' => intval($totalTransaccionesIngresos + $totalTransaccionesEgresos),
-                    ],
-                    'promedios' => [
-                        'promedio_recarga' => round($promedioIngreso, 2),
-                        'promedio_subtraccion' => round($promedioEgreso, 2),
-                    ],
-                    'rentabilidad_caja' => $ingresosCaja > 0 ? round((($ingresosCaja - $egresosCaja) / $ingresosCaja) * 100, 2) : 0, // % de retención de recargas
-                    'diferencia_saldo' => floatval($caja->saldo - $balanceCaja), // Diferencia con saldo actual (auditoría)
-                    'detalle_por_estado' => array_values($estadosPorCaja), // Nuevo: Desglose por estados (pagado, por pagar, etc.)
-                ];
-
-                // Acumular totales para cajas (solo para resumen interno)
-                $totalesGlobalesCajas['total_ingresos_cajas'] += $ingresosCaja;
-                $totalesGlobalesCajas['total_egresos_cajas'] += $egresosCaja;
-                $totalesGlobalesCajas['balance_global_cajas'] += $balanceCaja;
+                // Distribución por caja
+                $distribucionCajasPorBalance = collect($estadoPorCaja)->map(function ($item) use ($totalesGlobalesCajas) {
+                    $balanceGlobal = $totalesGlobalesCajas['balance_global_cajas'];
+                    return [
+                        'caja_id' => $item['caja_operativa']['id'],
+                        'nombre_caja' => $item['caja_operativa']['nombre'],
+                        'balance_periodo' => $item['periodo']['balance_periodo'],
+                        'porcentaje_balance' => $balanceGlobal != 0
+                            ? round(($item['periodo']['balance_periodo'] / $balanceGlobal) * 100, 2)
+                            : 0,
+                    ];
+                });
             }
 
-            // ============== DISTRIBUCIÓN POR CAJA (PARA GRÁFICOS INTERNO) ==============
-            $distribucionCajasPorBalance = collect($estadoPorCaja)->map(function ($item) use ($estadoPorCaja, $totalesGlobalesCajas) {
-                $totalCajas = count($estadoPorCaja);
-                $balanceGlobal = $totalesGlobalesCajas['balance_global_cajas'];
-                return [
-                    'caja_id' => $item['caja_operativa']['id'],
-                    'nombre_caja' => $item['caja_operativa']['nombre'],
-                    'balance_periodo' => $item['periodo']['balance_periodo'],
-                    'porcentaje_balance' => $totalCajas > 0 && $balanceGlobal != 0
-                        ? round(($item['periodo']['balance_periodo'] / $balanceGlobal) * 100, 2)
-                        : 0,
-                ];
-            });
-
-            // ============== TRANSACCIONES POR ESTADO (GLOBAL, INCLUYENDO REGLA) ==============
-            // Aplicar lógica global: Ingresos sin caja + todos los egresos
-            $transaccionesPorEstado = FinancialTransactions::where('negocio_id', $negocioId)
+            // ============== TRANSACCIONES POR ESTADO ==============
+            $queryTransaccionesEstado = FinancialTransactions::where('negocio_id', $negocioId)
                 ->where(function ($query) {
-                    // Todos los egresos
                     $query->where('tipo_de_transaccion', 'Egreso')
-                        // O ingresos sin caja operativa
                         ->orWhere(function ($query) {
                             $query->where('tipo_de_transaccion', 'Ingreso')
                                 ->whereNull('caja_operativa_id');
                         });
                 })
-                ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
+                ->whereBetween('fecha', [$fechaInicial, $fechaFinal]);
+
+            // Aplicar filtro de vehículo si existe
+            if ($esFiltradoPorVehiculo) {
+                $queryTransaccionesEstado->where('vehicle_id', $vehicleId);
+            }
+
+            $transaccionesPorEstado = $queryTransaccionesEstado
                 ->join('transaction_states', 'financial_transactions.estado_de_transaccion_id', '=', 'transaction_states.id')
                 ->select(
                     'transaction_states.id as estado_id',
@@ -293,7 +312,6 @@ class EstadoDeResultadosController extends Controller
                 )
                 ->get();
 
-            // Organizar por estado
             $estadosFinancieros = [];
             foreach ($transaccionesPorEstado as $transaccion) {
                 $estadoId = $transaccion->estado_id;
@@ -325,8 +343,8 @@ class EstadoDeResultadosController extends Controller
                     $estadosFinancieros[$estadoId]['ingresos'] - $estadosFinancieros[$estadoId]['egresos'];
             }
 
-            // ============== DISTRIBUCIÓN POR ESTADO (PARA GRÁFICO GLOBAL) ==============
-            $distribucionEstadosPorCantidad = FinancialTransactions::where('negocio_id', $negocioId)
+            // ============== DISTRIBUCIÓN POR ESTADO ==============
+            $queryDistribucion = FinancialTransactions::where('negocio_id', $negocioId)
                 ->where(function ($query) {
                     $query->where('tipo_de_transaccion', 'Egreso')
                         ->orWhere(function ($query) {
@@ -334,7 +352,13 @@ class EstadoDeResultadosController extends Controller
                                 ->whereNull('caja_operativa_id');
                         });
                 })
-                ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
+                ->whereBetween('fecha', [$fechaInicial, $fechaFinal]);
+
+            if ($esFiltradoPorVehiculo) {
+                $queryDistribucion->where('vehicle_id', $vehicleId);
+            }
+
+            $distribucionEstadosPorCantidad = $queryDistribucion
                 ->join('transaction_states', 'financial_transactions.estado_de_transaccion_id', '=', 'transaction_states.id')
                 ->select(
                     'transaction_states.id as estado_id',
@@ -363,8 +387,8 @@ class EstadoDeResultadosController extends Controller
                 ];
             });
 
-            // ============== RESUMEN POR CATEGORÍA (GLOBAL) ==============
-            $resumenPorCategoria = FinancialTransactions::where('negocio_id', $negocioId)
+            // ============== RESUMEN POR CATEGORÍA (FILTRADO) ==============
+            $queryCategoria = FinancialTransactions::where('negocio_id', $negocioId)
                 ->where(function ($query) {
                     $query->where('tipo_de_transaccion', 'Egreso')
                         ->orWhere(function ($query) {
@@ -372,7 +396,13 @@ class EstadoDeResultadosController extends Controller
                                 ->whereNull('caja_operativa_id');
                         });
                 })
-                ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
+                ->whereBetween('fecha', [$fechaInicial, $fechaFinal]);
+
+            if ($esFiltradoPorVehiculo) {
+                $queryCategoria->where('vehicle_id', $vehicleId);
+            }
+
+            $resumenPorCategoria = $queryCategoria
                 ->leftJoin('categories', 'financial_transactions.categoria_id', '=', 'categories.id')
                 ->select(
                     DB::raw('COALESCE(categories.nombre, "Sin Categoría") as categoria'),
@@ -404,104 +434,271 @@ class EstadoDeResultadosController extends Controller
 
                     $categoriaData['balance_categoria'] = $categoriaData['total_ingresos'] - $categoriaData['total_egresos'];
                     return $categoriaData;
+                })
+                // ⭐ FILTRAR: Solo categorías con movimiento
+                ->filter(function ($categoria) {
+                    $totalIngresos = floatval($categoria['total_ingresos']);
+                    $totalEgresos = floatval($categoria['total_egresos']);
+                    $cantidadTotal = intval($categoria['cantidad_ingresos']) + intval($categoria['cantidad_egresos']);
+
+                    // Solo incluir si tiene transacciones Y (tiene ingresos O tiene egresos)
+                    return $cantidadTotal > 0 && ($totalIngresos > 0 || $totalEgresos > 0);
                 });
 
+            // ⭐ FILTRAR ESTADÍSTICAS ADICIONALES: categoria_mayor y categoria_menor
+            $categoriaMayorEgreso = null;
+            $categoriaMenorEgreso = null;
+
+            if ($resumenPorCategoria->isNotEmpty()) {
+                // Filtrar solo categorías con egresos > 0
+                $categoriasConEgresos = $resumenPorCategoria->filter(function ($cat) {
+                    return floatval($cat['total_egresos']) > 0;
+                });
+
+                if ($categoriasConEgresos->isNotEmpty()) {
+                    // Mayor egreso
+                    $categoriaMayorEgreso = $categoriasConEgresos->sortByDesc('total_egresos')->first();
+
+                    // Menor egreso (pero mayor a 0)
+                    $categoriaMenorEgreso = $categoriasConEgresos->sortBy('total_egresos')->first();
+                }
+            }
+
             // ============== PREPARAR RESPUESTA ==============
-            // Formato para campos monetarios
             $formatoMoneda = function ($valor) {
                 return number_format($valor, 2, '.', ',');
             };
 
+            $responseData = [
+                'negocio' => [
+                    'id' => $negocioId,
+                    'nombre' => strtoupper($negocio->nombre)
+                ],
+                'periodo' => [
+                    'fecha_inicial' => $fechaInicial,
+                    'fecha_final' => $fechaFinal,
+                    'dias_periodo' => Carbon::parse($fechaInicial)->diffInDays(Carbon::parse($fechaFinal)) + 1
+                ],
+                'filtro' => [
+                    'por_vehiculo' => $esFiltradoPorVehiculo,
+                    'vehicle_id' => $vehicleId,
+                ],
+                'resumen_financiero' => [
+                    'total_ingresos_brutos' => $formatoMoneda($totalIngresosBrutos),
+                    'total_ingresos_brutos_raw' => floatval($totalIngresosBrutos),
+                    'total_egresos_brutos' => $formatoMoneda($totalEgresosBrutos),
+                    'total_egresos_brutos_raw' => floatval($totalEgresosBrutos),
+                    'margen_bruto' => $formatoMoneda($margenBruto),
+                    'margen_bruto_raw' => floatval($margenBruto),
+                    'margen_util_antes_impuestos' => $formatoMoneda($margenUtilAntesImpuestos),
+                    'margen_util_antes_impuestos_raw' => floatval($margenUtilAntesImpuestos),
+                    'impuestos_estimados' => $formatoMoneda($impuestosEstimados),
+                    'costos_fijos_adicionales' => $formatoMoneda($costosFijosAdicionales),
+                    'rentabilidad_porcentaje' => number_format($rentabilidadPorcentaje, 2, '.', ''),
+                    'rentabilidad_porcentaje_raw' => floatval($rentabilidadPorcentaje),
+                ],
+                'detalle_por_estado' => array_values($estadosFinancieros),
+                'distribucion_estados' => [
+                    'por_cantidad' => $distribucionEstadosPorCantidad->toArray(),
+                    'por_importe' => $distribucionEstadosPorCantidad->sortByDesc('total_importe')->values()->toArray()
+                ],
+                'resumen_por_categoria' => $resumenPorCategoria->values()->all(),
+                'estadisticas_adicionales' => [
+                    'total_transacciones' => $transaccionesPorEstado->sum('total_transacciones'),
+                    'total_transacciones_ingresos' => $transaccionesPorEstado->filter(fn($t) => $t->tipo_de_transaccion === 'Ingreso')->sum('total_transacciones'),
+                    'total_transacciones_egresos' => $transaccionesPorEstado->filter(fn($t) => $t->tipo_de_transaccion === 'Egreso')->sum('total_transacciones'),
+                    'promedio_ingreso_transaccion' => $totalIngresosBrutos > 0 &&
+                        $transaccionesPorEstado->filter(fn($t) => $t->tipo_de_transaccion === 'Ingreso')->sum('total_transacciones') > 0
+                        ? $formatoMoneda($totalIngresosBrutos / $transaccionesPorEstado->filter(fn($t) => $t->tipo_de_transaccion === 'Ingreso')->sum('total_transacciones'))
+                        : '0.00',
+                    'promedio_egreso_transaccion' => $totalEgresosBrutos > 0 &&
+                        $transaccionesPorEstado->filter(fn($t) => $t->tipo_de_transaccion === 'Egreso')->sum('total_transacciones') > 0
+                        ? $formatoMoneda($totalEgresosBrutos / $transaccionesPorEstado->filter(fn($t) => $t->tipo_de_transaccion === 'Egreso')->sum('total_transacciones'))
+                        : '0.00',
+                    // ⭐ AGREGAR: estadísticas filtradas
+                    'categoria_mayor_egreso' => $categoriaMayorEgreso ? [
+                        'categoria' => $categoriaMayorEgreso['categoria'],
+                        'total_egresos' => floatval($categoriaMayorEgreso['total_egresos']),
+                        'cantidad_transacciones' => intval($categoriaMayorEgreso['cantidad_egresos'])
+                    ] : null,
+                    'categoria_menor_egreso' => $categoriaMenorEgreso ? [
+                        'categoria' => $categoriaMenorEgreso['categoria'],
+                        'total_egresos' => floatval($categoriaMenorEgreso['total_egresos']),
+                        'cantidad_transacciones' => intval($categoriaMenorEgreso['cantidad_egresos'])
+                    ] : null,
+                ]
+            ];
+
+            // Si hay filtro por vehículo, agregar información del vehículo
+            if ($esFiltradoPorVehiculo && $vehicle) {
+                $responseData['vehiculo'] = [
+                    'id' => $vehicle->id,
+                    'codigo_unico' => $vehicle->codigo_unico,
+                    'numero_placa' => $vehicle->numero_placa,
+                    'marca' => $vehicle->marca,
+                    'modelo' => $vehicle->modelo,
+                    'año' => $vehicle->año,
+                    'tipo_vehiculo' => $vehicle->tipo_vehiculo,
+                    'tipo_propiedad' => strtoupper($vehicle->tipo_propiedad),
+                    'valor_actual' => floatval($vehicle->valor_actual ?? 0),
+                    'precio_compra' => floatval($vehicle->precio_compra ?? 0),
+                ];
+            }
+
+            // Si NO hay filtro por vehículo, agregar datos de cajas operativas
+            if (!$esFiltradoPorVehiculo) {
+                $responseData['resumen_global_cajas'] = [
+                    'total_ingresos_cajas' => $formatoMoneda($totalesGlobalesCajas['total_ingresos_cajas']),
+                    'total_ingresos_cajas_raw' => $totalesGlobalesCajas['total_ingresos_cajas'],
+                    'total_egresos_cajas' => $formatoMoneda($totalesGlobalesCajas['total_egresos_cajas']),
+                    'total_egresos_cajas_raw' => $totalesGlobalesCajas['total_egresos_cajas'],
+                    'balance_global_cajas' => $formatoMoneda($totalesGlobalesCajas['balance_global_cajas']),
+                    'balance_global_cajas_raw' => $totalesGlobalesCajas['balance_global_cajas'],
+                    'total_cajas_activas' => count($estadoPorCaja),
+                ];
+                $responseData['detalle_por_caja'] = array_values($estadoPorCaja);
+                $responseData['distribucion_cajas'] = [
+                    'por_balance' => $distribucionCajasPorBalance->values()->toArray(),
+                    'por_ingresos' => $distribucionCajasPorBalance->sortByDesc('balance_periodo')->values()->toArray(),
+                ];
+                $responseData['estadisticas_adicionales']['total_transacciones_cajas'] = collect($estadoPorCaja)->sum('transacciones_totales.total_transacciones_caja');
+                $responseData['estadisticas_adicionales']['promedio_balance_por_caja'] = count($estadoPorCaja) > 0
+                    ? round($totalesGlobalesCajas['balance_global_cajas'] / count($estadoPorCaja), 2)
+                    : 0;
+            }
+
             $response = [
                 'status' => 'success',
-                'message' => 'Estado financiero global generado exitosamente',
-                'datos' => [
-                    'negocio' => [
-                        'id' => $negocioId,
-                        'nombre' => strtoupper($negocio->nombre)
-                    ],
-                    'periodo' => [
-                        'fecha_inicial' => $fechaInicial,
-                        'fecha_final' => $fechaFinal,
-                        'dias_periodo' => Carbon::parse($fechaInicial)->diffInDays(Carbon::parse($fechaFinal)) + 1
-                    ],
-                    // RESUMEN GLOBAL DEL NEGOCIO (principal)
-                    'resumen_financiero' => [
-                        'total_ingresos_brutos' => $formatoMoneda($totalIngresosBrutos),
-                        'total_ingresos_brutos_raw' => floatval($totalIngresosBrutos),
-                        'total_egresos_brutos' => $formatoMoneda($totalEgresosBrutos),
-                        'total_egresos_brutos_raw' => floatval($totalEgresosBrutos),
-                        'margen_bruto' => $formatoMoneda($margenBruto),
-                        'margen_bruto_raw' => floatval($margenBruto),
-                        'margen_util_antes_impuestos' => $formatoMoneda($margenUtilAntesImpuestos),
-                        'margen_util_antes_impuestos_raw' => floatval($margenUtilAntesImpuestos),
-                        'impuestos_estimados' => $formatoMoneda($impuestosEstimados),
-                        'costos_fijos_adicionales' => $formatoMoneda($costosFijosAdicionales),
-                        'rentabilidad_porcentaje' => number_format($rentabilidadPorcentaje, 2, '.', ''),
-                        'rentabilidad_porcentaje_raw' => floatval($rentabilidadPorcentaje),
-                    ],
-                    // RESUMEN DE CAJAS OPERATIVAS (secundario, para auditoría)
-                    'resumen_global_cajas' => [
-                        'total_ingresos_cajas' => $formatoMoneda($totalesGlobalesCajas['total_ingresos_cajas']),
-                        'total_ingresos_cajas_raw' => $totalesGlobalesCajas['total_ingresos_cajas'],
-                        'total_egresos_cajas' => $formatoMoneda($totalesGlobalesCajas['total_egresos_cajas']),
-                        'total_egresos_cajas_raw' => $totalesGlobalesCajas['total_egresos_cajas'],
-                        'balance_global_cajas' => $formatoMoneda($totalesGlobalesCajas['balance_global_cajas']),
-                        'balance_global_cajas_raw' => $totalesGlobalesCajas['balance_global_cajas'],
-                        'total_cajas_activas' => count($cajasOperativas),
-                    ],
-                    'detalle_por_caja' => array_values($estadoPorCaja), // Incluye ahora detalle_por_estado por caja
-                    'distribucion_cajas' => [
-                        'por_balance' => $distribucionCajasPorBalance->values()->toArray(),
-                        'por_ingresos' => $distribucionCajasPorBalance->sortByDesc('balance_periodo')->values()->toArray(),
-                    ],
-                    // DETALLES GLOBALES
-                    'detalle_por_estado' => array_values($estadosFinancieros),
-                    'distribucion_estados' => [
-                        'por_cantidad' => $distribucionEstadosPorCantidad->toArray(),
-                        'por_importe' => $distribucionEstadosPorCantidad->sortByDesc('total_importe')->values()->toArray()
-                    ],
-                    'resumen_por_categoria' => $resumenPorCategoria->values()->all(),
-                    'estadisticas_adicionales' => [
-                        'total_transacciones' => $transaccionesPorEstado->sum('total_transacciones'),
-                        'total_transacciones_ingresos' => $transaccionesPorEstado->filter(fn($t) => $t->tipo_de_transaccion === 'Ingreso')->sum('total_transacciones'),
-                        'total_transacciones_egresos' => $transaccionesPorEstado->filter(fn($t) => $t->tipo_de_transaccion === 'Egreso')->sum('total_transacciones'),
-                        'total_transacciones_cajas' => collect($estadoPorCaja)->sum('transacciones_totales.total_transacciones_caja'),
-                        'promedio_ingreso_transaccion' => $totalIngresosBrutos > 0 &&
-                            $transaccionesPorEstado->filter(fn($t) => $t->tipo_de_transaccion === 'Ingreso')->sum('total_transacciones') > 0
-                            ? $formatoMoneda($totalIngresosBrutos / $transaccionesPorEstado->filter(fn($t) => $t->tipo_de_transaccion === 'Ingreso')->sum('total_transacciones'))
-                            : '0.00',
-                        'promedio_egreso_transaccion' => $totalEgresosBrutos > 0 &&
-                            $transaccionesPorEstado->filter(fn($t) => $t->tipo_de_transaccion === 'Egreso')->sum('total_transacciones') > 0
-                            ? $formatoMoneda($totalEgresosBrutos / $transaccionesPorEstado->filter(fn($t) => $t->tipo_de_transaccion === 'Egreso')->sum('total_transacciones'))
-                            : '0.00',
-                        'promedio_balance_por_caja' => count($estadoPorCaja) > 0 ? round($totalesGlobalesCajas['balance_global_cajas'] / count($estadoPorCaja), 2) : 0,
-                    ]
-                ],
+                'message' => $esFiltradoPorVehiculo
+                    ? 'Estado financiero del vehículo generado exitosamente'
+                    : 'Estado financiero global generado exitosamente',
+                'datos' => $responseData,
                 'timestamp' => now()->toDateTimeString()
             ];
 
-            Log::info('Estado financiero global generado exitosamente', [
+            Log::info('Estado financiero generado exitosamente', [
                 'negocio_id' => $negocioId,
+                'vehicle_id' => $vehicleId,
+                'filtrado_por_vehiculo' => $esFiltradoPorVehiculo,
                 'total_ingresos_brutos' => $totalIngresosBrutos,
                 'total_egresos_brutos' => $totalEgresosBrutos,
                 'margen_bruto' => $margenBruto,
-                'balance_global_cajas' => $totalesGlobalesCajas['balance_global_cajas'],
-                'total_cajas' => count($cajasOperativas)
+                'categorias_con_movimiento' => $resumenPorCategoria->count(),
             ]);
 
             return response()->json($response, 200);
         } catch (\Exception $e) {
-            Log::error('Error al generar estado financiero global', [
+            Log::error('Error al generar estado financiero', [
                 'negocio_id' => $negocioId ?? null,
+                'vehicle_id' => $vehicleId ?? null,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error al generar el estado financiero global',
+                'message' => 'Error al generar el estado financiero',
                 'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+    public function getVehiclesByBusiness(Request $request)
+    {
+        try {
+
+            $validator = Validator::make($request->all(), [
+                'negocio_id' => 'required|exists:businesses,id',
+            ], [
+                'negocio_id.required' => 'El ID del negocio es obligatorio',
+                'negocio_id.exists' => 'El negocio seleccionado no existe',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Parámetros inválidos',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $negocioId = $request->input('negocio_id');
+
+            // Primero verificar si hay vehículos SIN el filtro de is_active
+            $totalVehicles = Vehicle::where('negocio_id', $negocioId)->count();
+            $activeVehicles = Vehicle::where('negocio_id', $negocioId)
+                ->where('is_active', true)
+                ->count();
+
+            // Obtener vehículos activos
+            $vehicles = Vehicle::where('negocio_id', $negocioId)
+                ->where('is_active', true)
+                ->with(['user.generalData'])
+                ->orderBy('tipo_propiedad')
+                ->orderBy('codigo_unico')
+                ->get();
+
+            if ($vehicles->isEmpty()) {
+                // Si no hay vehículos activos, intentar obtener todos
+                $allVehicles = Vehicle::where('negocio_id', $negocioId)->get();
+
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'No hay vehículos activos para este negocio',
+                    'datos' => [],
+                    'total' => 0,
+                    'debug' => [
+                        'total_vehiculos_db' => $totalVehicles,
+                        'vehiculos_activos' => $activeVehicles,
+                        'vehiculos_inactivos' => $allVehicles->pluck('codigo_unico')
+                    ]
+                ], 200);
+            }
+
+            $vehiculosData = $vehicles->map(function ($vehicle) {
+                $assignedUserName = 'Sin asignar';
+                if ($vehicle->user && $vehicle->user->generalData) {
+                    $assignedUserName = $vehicle->user->generalData->nombre . ' ' .
+                        $vehicle->user->generalData->apellido;
+                }
+
+                return [
+                    'id' => $vehicle->id,
+                    'codigo_unico' => $vehicle->codigo_unico,
+                    'numero_placa' => $vehicle->numero_placa,
+                    'numero_vin' => $vehicle->numero_vin,
+                    'marca' => $vehicle->marca,
+                    'modelo' => $vehicle->modelo,
+                    'año' => $vehicle->año,
+                    'color' => $vehicle->color,
+                    'tipo_vehiculo' => $vehicle->tipo_vehiculo,
+                    'tipo_propiedad' => strtoupper($vehicle->tipo_propiedad),
+                    'usuario_asignado' => $assignedUserName,
+                    'usuario_asignado_id' => $vehicle->user_id,
+                    'valor_actual' => floatval($vehicle->valor_actual ?? 0),
+                    'precio_compra' => floatval($vehicle->precio_compra ?? 0),
+                    'millaje' => intval($vehicle->millaje ?? 0),
+                    'is_active' => $vehicle->estado,
+                    'nombre_display' => trim("{$vehicle->codigo_unico} - {$vehicle->numero_placa} ({$vehicle->marca} {$vehicle->modelo})")
+                ];
+            });
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Vehículos obtenidos correctamente',
+                'datos' => $vehiculosData->toArray(),
+                'total' => $vehiculosData->count(),
+                'timestamp' => now()->toDateTimeString()
+            ], 200);
+        } catch (\Exception $e) {
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al obtener los vehículos',
+                'error' => $e->getMessage(),
+                'debug' => [
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine()
+                ]
             ], 500);
         }
     }

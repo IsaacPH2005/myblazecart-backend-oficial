@@ -264,6 +264,13 @@ Route::middleware('auth:sanctum')->group(function () {
             //Obtener estado financiero de vehículos de un negocio
             Route::get('/vehicles-financial-statement', [VehiculosDelNegocioController::class, 'getVehiclesFinancialStatementByBusiness']);
             Route::get('/vehicle-financial-statement', [VehiculosDelNegocioController::class, 'getVehicleFinancialStatement']);
+            Route::get('/by-business', [VehiculosDelNegocioController::class, 'getVehiclesByBusiness']);
+
+
+
+
+
+
             //Obtener   rendición de cajas operativas
             Route::get('/rendicion-cajas-operativas', [RendicionCajaOperativasController::class, 'resumenCajasOperativas']);
             // Nuevas rutas para exportación

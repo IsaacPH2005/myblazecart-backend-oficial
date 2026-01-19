@@ -29,7 +29,7 @@ class Business extends Model
     }
     public function cajasOperativas()
     {
-        return $this->hasMany(OperatingBox::class, 'caja_operativa_id');
+        return $this->hasMany(OperatingBox::class, 'negocio_id');
     }
 
 
