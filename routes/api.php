@@ -253,7 +253,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
             // Obtener egresos por categoría filtrados por negocio y rango de fechas
             Route::get('/expenses-by-category', [EgresosPorCategoriaController::class, 'getExpensesByCategoryByBusiness']);
+            // Obtener datos
+            Route::get('/expenses-by-category', [EgresosPorCategoriaController::class, 'getExpensesByCategoryByBusiness']);
+            Route::get('/incomes-by-category', [EgresosPorCategoriaController::class, 'getIncomesByCategoryByBusiness']); // Si lo necesitas
 
+            // Exportar a Excel
+            Route::get('/export-expenses-excel', [EgresosPorCategoriaController::class, 'exportExpensesToExcel']);
+            Route::get('/export-incomes-excel', [EgresosPorCategoriaController::class, 'exportIncomesToExcel']);
             // Obtener ingresos por categoría filtrados por negocio y rango de fechas
             Route::get('/incomes-by-category', [IngresosPorNegocioController::class, 'getIncomesByBusiness']);
             Route::get('/export-incomes-excel', [IngresosPorNegocioController::class, 'exportIncomesByBusinessToExcel']);
