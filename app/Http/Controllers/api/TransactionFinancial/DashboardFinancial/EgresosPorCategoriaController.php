@@ -293,23 +293,25 @@ class EgresosPorCategoriaController extends Controller
                 ->with('categoria')
                 ->get();
 
-            $totalEgresosVehiculo = $egresosVehiculo->sum('importe_total');
-            $cantidadTransacciones = $egresosVehiculo->count();
+            $totalEgresosVehiculo   = $egresosVehiculo->sum('importe_total');
+            $cantidadTransacciones  = $egresosVehiculo->count();
 
             // Agrupar por categoría
             $egresosPorCategoria = $egresosVehiculo->groupBy('categoria_id')
                 ->map(function ($categoriaGroup, $categoriaId) use ($totalEgresosVehiculo) {
-                    $categoria = $categoriaGroup->first()->categoria;
-                    $totalCategoria = $categoriaGroup->sum('importe_total');
-                    $porcentaje = $totalEgresosVehiculo > 0 ? ($totalCategoria / $totalEgresosVehiculo) * 100 : 0;
+                    $categoria       = $categoriaGroup->first()->categoria;
+                    $totalCategoria  = $categoriaGroup->sum('importe_total');
+                    $porcentaje      = $totalEgresosVehiculo > 0
+                        ? ($totalCategoria / $totalEgresosVehiculo) * 100
+                        : 0;
 
                     return [
-                        'categoria_id' => $categoriaId,
-                        'categoria_nombre' => $categoria->nombre ?? 'Sin categoría',
-                        'total_categoria' => floatval($totalCategoria),
-                        'porcentaje' => round($porcentaje, 2),
-                        'cantidad_transacciones' => $categoriaGroup->count(),
-                        'promedio_egreso' => floatval($categoriaGroup->avg('importe_total')),
+                        'categoria_id'            => $categoriaId,
+                        'categoria_nombre'        => $categoria->nombre ?? 'Sin categoría',
+                        'total_categoria'         => floatval($totalCategoria),
+                        'porcentaje'              => round($porcentaje, 2),
+                        'cantidad_transacciones'  => $categoriaGroup->count(),
+                        'promedio_egreso'         => floatval($categoriaGroup->avg('importe_total')),
                     ];
                 })
                 ->sortByDesc('total_categoria')
@@ -318,31 +320,36 @@ class EgresosPorCategoriaController extends Controller
 
             $desglose[] = [
                 'vehiculo' => [
-                    'id' => $vehiculo->id,
-                    'codigo_unico' => $vehiculo->codigo_unico,
-                    'numero_placa' => $vehiculo->numero_placa,
-                    'marca' => $vehiculo->marca,
-                    'modelo' => $vehiculo->modelo,
-                    'año' => $vehiculo->año,
-                    'tipo_vehiculo' => $vehiculo->tipo_vehiculo,
+                    'id'             => $vehiculo->id,
+                    'codigo_unico'   => $vehiculo->codigo_unico,
+                    'numero_placa'   => $vehiculo->numero_placa,
+                    'marca'          => $vehiculo->marca,
+                    'modelo'         => $vehiculo->modelo,
+                    'año'            => $vehiculo->año,
+                    'tipo_vehiculo'  => $vehiculo->tipo_vehiculo,
                     'tipo_propiedad' => strtoupper($vehiculo->tipo_propiedad),
                 ],
                 'resumen' => [
-                    'total_egresos' => floatval($totalEgresosVehiculo),
+                    'total_egresos'          => floatval($totalEgresosVehiculo),
                     'cantidad_transacciones' => $cantidadTransacciones,
-                    'promedio_egreso' => $cantidadTransacciones > 0 ? floatval($totalEgresosVehiculo / $cantidadTransacciones) : 0.0,
+                    'promedio_egreso'        => $cantidadTransacciones > 0
+                        ? floatval($totalEgresosVehiculo / $cantidadTransacciones)
+                        : 0.0,
                 ],
                 'categorias' => $egresosPorCategoria,
             ];
         }
 
-        // Ordenar vehículos por total de egresos (mayor a menor)
+        // Ordenar vehículos por total de egresos (de mayor a menor)
         usort($desglose, function ($a, $b) {
             return $b['resumen']['total_egresos'] <=> $a['resumen']['total_egresos'];
         });
 
         return $desglose;
     }
+
+
+
 
     /**
      * Obtener el negocio con mayor egreso en el período
