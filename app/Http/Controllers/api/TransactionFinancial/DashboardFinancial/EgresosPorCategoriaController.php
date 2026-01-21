@@ -4,6 +4,8 @@ namespace App\Http\Controllers\api\TransactionFinancial\DashboardFinancial;
 
 use App\Http\Controllers\Controller;
 use App\Models\Business;
+use App\Models\Category;
+// ✅ IMPORTANTE: Agregar este import
 use App\Models\FinancialTransactions;
 use App\Models\Vehicle;
 use Illuminate\Http\Request;
@@ -18,6 +20,11 @@ use PhpOffice\PhpSpreadsheet\Style\Fill;
 
 class EgresosPorCategoriaController extends Controller
 {
+    /**
+     * ============================================================================
+     * OBTENER EGRESOS POR CATEGORÍA CON FILTRO OPCIONAL DE VEHÍCULO
+     * ============================================================================
+     */
     public function getExpensesByCategoryByBusiness(Request $request)
     {
         try {
@@ -78,7 +85,7 @@ class EgresosPorCategoriaController extends Controller
                 }
             }
 
-            Log::info('Procesando egresos por categoría', [
+            Log::info('🔍 Procesando egresos por categoría', [
                 'negocio_id' => $negocioId,
                 'vehicle_id' => $vehicleId,
                 'filtrado_por_vehiculo' => $esFiltradoPorVehiculo,
@@ -103,6 +110,11 @@ class EgresosPorCategoriaController extends Controller
             // ============== CALCULAR TOTALES GLOBALES ==============
             $totalGlobal = $query->sum('importe_total');
             $cantidadGlobal = $query->count();
+
+            Log::info('💰 Totales calculados', [
+                'total_global' => $totalGlobal,
+                'cantidad_transacciones' => $cantidadGlobal
+            ]);
 
             // ============== OBTENER EGRESOS AGRUPADOS POR CATEGORÍA ==============
             $egresos = $query->get()
@@ -155,13 +167,21 @@ class EgresosPorCategoriaController extends Controller
                     }
                 })
                 ->sortByDesc('porcentaje')
-                ->values() // ⚠️ IMPORTANTE: Convertir a array indexado
+                ->values() // ✅ Convertir a array indexado
                 ->all();
+
+            Log::info('📊 Categorías procesadas', [
+                'total_categorias' => count($todasCategorias),
+                'categorias_con_egresos' => $egresosOrdenados->count()
+            ]);
 
             // ============== DESGLOSE POR VEHÍCULO (SOLO SI NO HAY FILTRO DE VEHÍCULO) ==============
             $desglosePorVehiculo = [];
             if (!$esFiltradoPorVehiculo && $negocioId) {
                 $desglosePorVehiculo = $this->getDesglosePorVehiculo($negocioId, $fechaInicial, $fechaFinal);
+                Log::info('🚗 Desglose por vehículo generado', [
+                    'cantidad_vehiculos' => count($desglosePorVehiculo)
+                ]);
             }
 
             // ============== PREPARAR RESPUESTA ==============
@@ -179,7 +199,7 @@ class EgresosPorCategoriaController extends Controller
                     'negocio' => $negocio ? [
                         'id' => $negocio->id,
                         'nombre' => $negocio->nombre
-                    ] : 'Global (todos los negocios)',
+                    ] : null,
                     'filtro' => [
                         'por_vehiculo' => $esFiltradoPorVehiculo,
                         'vehicle_id' => $vehicleId,
@@ -189,7 +209,7 @@ class EgresosPorCategoriaController extends Controller
                         'cantidad_transacciones' => $cantidadGlobal,
                         'promedio_egreso' => $cantidadGlobal > 0 ? floatval($totalGlobal / $cantidadGlobal) : 0.0,
                     ],
-                    'categorias' => $todasCategorias, // ✅ Array indexado, no objeto
+                    'categorias' => $todasCategorias, // ✅ Array indexado
                     'estadisticas_adicionales' => [
                         'categoria_mayor_egreso' => $egresosOrdenados->first(),
                         'categoria_menor_egreso' => $egresosOrdenados->filter(fn($cat) => $cat['total_categoria'] > 0)->last(),
@@ -219,20 +239,21 @@ class EgresosPorCategoriaController extends Controller
                 $response['data']['desglose_por_vehiculo'] = $desglosePorVehiculo;
             }
 
-            Log::info('Egresos por categoría procesados exitosamente', [
+            Log::info('✅ Egresos por categoría procesados exitosamente', [
                 'negocio_id' => $negocioId,
                 'vehicle_id' => $vehicleId,
                 'total_egresos' => $totalGlobal,
-                'cantidad_categorias_con_egresos' => $egresosOrdenados->count(),
-                'cantidad_categorias_total' => count($todasCategorias)
+                'cantidad_categorias' => count($todasCategorias)
             ]);
 
             return response()->json($response, 200);
         } catch (\Exception $e) {
-            Log::error('Error al obtener egresos por categoría', [
+            Log::error('❌ Error al obtener egresos por categoría', [
                 'negocio_id' => $negocioId ?? null,
                 'vehicle_id' => $vehicleId ?? null,
                 'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString()
             ]);
 
@@ -245,7 +266,9 @@ class EgresosPorCategoriaController extends Controller
     }
 
     /**
+     * ============================================================================
      * OBTENER DESGLOSE DE EGRESOS POR VEHÍCULO Y SUS CATEGORÍAS
+     * ============================================================================
      */
     private function getDesglosePorVehiculo($negocioId, $fechaInicial, $fechaFinal)
     {
@@ -345,6 +368,9 @@ class EgresosPorCategoriaController extends Controller
         return $desglose;
     }
 
+    /**
+     * Obtener el negocio con mayor egreso en el período
+     */
     private function getNegocioMayorEgreso($fechaInicial, $fechaFinal)
     {
         $negocioMayor = FinancialTransactions::where('tipo_de_transaccion', 'Egreso')
@@ -366,6 +392,9 @@ class EgresosPorCategoriaController extends Controller
         ] : null;
     }
 
+    /**
+     * Obtener distribución porcentual de egresos por categoría
+     */
     private function getDistribucionPorcentual($egresos, $totalGlobal)
     {
         if ($totalGlobal <= 0) {
@@ -384,6 +413,11 @@ class EgresosPorCategoriaController extends Controller
         })->sortByDesc('porcentaje')->values()->all();
     }
 
+    /**
+     * ============================================================================
+     * EXPORTAR EGRESOS A EXCEL
+     * ============================================================================
+     */
     public function exportExpensesToExcel(Request $request)
     {
         try {
@@ -527,7 +561,7 @@ class EgresosPorCategoriaController extends Controller
             $writer = new Xlsx($spreadsheet);
             $writer->save($tempFile);
 
-            Log::info('Excel de egresos generado exitosamente', [
+            Log::info('✅ Excel de egresos generado', [
                 'negocio_id' => $negocioId,
                 'vehicle_id' => $vehicleId,
                 'archivo' => $fileName
@@ -537,7 +571,7 @@ class EgresosPorCategoriaController extends Controller
                 'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             ])->deleteFileAfterSend(true);
         } catch (\Exception $e) {
-            Log::error('Error al exportar egresos a Excel', [
+            Log::error('❌ Error al exportar egresos a Excel', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
@@ -548,5 +582,19 @@ class EgresosPorCategoriaController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * ============================================================================
+     * EXPORTAR INGRESOS A EXCEL (SI LO NECESITAS)
+     * ============================================================================
+     */
+    public function exportIncomesToExcel(Request $request)
+    {
+        // Implementa aquí si necesitas exportar ingresos
+        return response()->json([
+            'status' => 'info',
+            'message' => 'Método de exportación de ingresos no implementado'
+        ], 501);
     }
 }
