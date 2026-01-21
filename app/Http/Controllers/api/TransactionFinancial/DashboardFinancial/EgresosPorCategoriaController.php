@@ -11,6 +11,10 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
 
 class EgresosPorCategoriaController extends Controller
 {
@@ -257,8 +261,11 @@ class EgresosPorCategoriaController extends Controller
 
     /**
      * ============================================================================
-     * OBTENER DESGLOSE DE EGRESOS POR VEHÍCULO
+     * OBTENER DESGLOSE DE EGRESOS POR VEHÍCULO Y SUS CATEGORÍAS
      * ============================================================================
+     *
+     * Este método obtiene TODOS los vehículos del negocio (con o sin egresos)
+     * y calcula sus egresos por categoría en el período especificado
      *
      * @param int $negocioId
      * @param string $fechaInicial
@@ -267,25 +274,17 @@ class EgresosPorCategoriaController extends Controller
      */
     private function getDesglosePorVehiculo($negocioId, $fechaInicial, $fechaFinal)
     {
-        // Obtener todos los vehículos del negocio que tienen egresos en el período
-        $vehiculosConEgresos = FinancialTransactions::where('negocio_id', $negocioId)
-            ->where('tipo_de_transaccion', 'Egreso')
-            ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-            ->whereNotNull('vehicle_id')
-            ->select('vehicle_id')
-            ->distinct()
-            ->pluck('vehicle_id');
+        // Obtener TODOS los vehículos del negocio (independiente de si tienen egresos)
+        $vehiculos = Vehicle::where('negocio_id', $negocioId)->get();
 
-        if ($vehiculosConEgresos->isEmpty()) {
+        if ($vehiculos->isEmpty()) {
             return [];
         }
-
-        $vehiculos = Vehicle::whereIn('id', $vehiculosConEgresos)->get();
 
         $desglose = [];
 
         foreach ($vehiculos as $vehiculo) {
-            // Obtener egresos del vehículo por categoría
+            // Obtener egresos del vehículo en el período
             $egresosVehiculo = FinancialTransactions::where('negocio_id', $negocioId)
                 ->where('vehicle_id', $vehiculo->id)
                 ->where('tipo_de_transaccion', 'Egreso')
@@ -293,25 +292,48 @@ class EgresosPorCategoriaController extends Controller
                 ->with('categoria')
                 ->get();
 
-            $totalEgresosVehiculo   = $egresosVehiculo->sum('importe_total');
-            $cantidadTransacciones  = $egresosVehiculo->count();
+            $totalEgresosVehiculo = $egresosVehiculo->sum('importe_total');
+            $cantidadTransacciones = $egresosVehiculo->count();
+
+            // Si el vehículo no tiene egresos, igual lo incluimos con valores en 0
+            if ($cantidadTransacciones === 0) {
+                $desglose[] = [
+                    'vehiculo' => [
+                        'id' => $vehiculo->id,
+                        'codigo_unico' => $vehiculo->codigo_unico,
+                        'numero_placa' => $vehiculo->numero_placa,
+                        'marca' => $vehiculo->marca,
+                        'modelo' => $vehiculo->modelo,
+                        'año' => $vehiculo->año,
+                        'tipo_vehiculo' => $vehiculo->tipo_vehiculo,
+                        'tipo_propiedad' => strtoupper($vehiculo->tipo_propiedad),
+                    ],
+                    'resumen' => [
+                        'total_egresos' => 0.0,
+                        'cantidad_transacciones' => 0,
+                        'promedio_egreso' => 0.0,
+                    ],
+                    'categorias' => [],
+                ];
+                continue;
+            }
 
             // Agrupar por categoría
             $egresosPorCategoria = $egresosVehiculo->groupBy('categoria_id')
                 ->map(function ($categoriaGroup, $categoriaId) use ($totalEgresosVehiculo) {
-                    $categoria       = $categoriaGroup->first()->categoria;
-                    $totalCategoria  = $categoriaGroup->sum('importe_total');
-                    $porcentaje      = $totalEgresosVehiculo > 0
+                    $categoria = $categoriaGroup->first()->categoria;
+                    $totalCategoria = $categoriaGroup->sum('importe_total');
+                    $porcentaje = $totalEgresosVehiculo > 0
                         ? ($totalCategoria / $totalEgresosVehiculo) * 100
                         : 0;
 
                     return [
-                        'categoria_id'            => $categoriaId,
-                        'categoria_nombre'        => $categoria->nombre ?? 'Sin categoría',
-                        'total_categoria'         => floatval($totalCategoria),
-                        'porcentaje'              => round($porcentaje, 2),
-                        'cantidad_transacciones'  => $categoriaGroup->count(),
-                        'promedio_egreso'         => floatval($categoriaGroup->avg('importe_total')),
+                        'categoria_id' => $categoriaId,
+                        'categoria_nombre' => $categoria->nombre ?? 'Sin categoría',
+                        'total_categoria' => floatval($totalCategoria),
+                        'porcentaje' => round($porcentaje, 2),
+                        'cantidad_transacciones' => $categoriaGroup->count(),
+                        'promedio_egreso' => floatval($categoriaGroup->avg('importe_total')),
                     ];
                 })
                 ->sortByDesc('total_categoria')
@@ -320,19 +342,19 @@ class EgresosPorCategoriaController extends Controller
 
             $desglose[] = [
                 'vehiculo' => [
-                    'id'             => $vehiculo->id,
-                    'codigo_unico'   => $vehiculo->codigo_unico,
-                    'numero_placa'   => $vehiculo->numero_placa,
-                    'marca'          => $vehiculo->marca,
-                    'modelo'         => $vehiculo->modelo,
-                    'año'            => $vehiculo->año,
-                    'tipo_vehiculo'  => $vehiculo->tipo_vehiculo,
+                    'id' => $vehiculo->id,
+                    'codigo_unico' => $vehiculo->codigo_unico,
+                    'numero_placa' => $vehiculo->numero_placa,
+                    'marca' => $vehiculo->marca,
+                    'modelo' => $vehiculo->modelo,
+                    'año' => $vehiculo->año,
+                    'tipo_vehiculo' => $vehiculo->tipo_vehiculo,
                     'tipo_propiedad' => strtoupper($vehiculo->tipo_propiedad),
                 ],
                 'resumen' => [
-                    'total_egresos'          => floatval($totalEgresosVehiculo),
+                    'total_egresos' => floatval($totalEgresosVehiculo),
                     'cantidad_transacciones' => $cantidadTransacciones,
-                    'promedio_egreso'        => $cantidadTransacciones > 0
+                    'promedio_egreso' => $cantidadTransacciones > 0
                         ? floatval($totalEgresosVehiculo / $cantidadTransacciones)
                         : 0.0,
                 ],
@@ -347,9 +369,6 @@ class EgresosPorCategoriaController extends Controller
 
         return $desglose;
     }
-
-
-
 
     /**
      * Obtener el negocio con mayor egreso en el período
@@ -395,6 +414,10 @@ class EgresosPorCategoriaController extends Controller
             ];
         })->sortByDesc('porcentaje')->values()->all();
     }
+
+    /**
+     * Exportar egresos por categoría a Excel
+     */
     public function exportExpensesToExcel(Request $request)
     {
         try {
@@ -574,6 +597,10 @@ class EgresosPorCategoriaController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Exportar ingresos por categoría a Excel
+     */
     public function exportIncomesToExcel(Request $request)
     {
         try {
