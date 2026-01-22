@@ -5,6 +5,7 @@ namespace App\Http\Controllers\api\TransactionFinancial\DashboardFinancial;
 use App\Http\Controllers\Controller;
 use App\Models\MovementsBox;
 use App\Models\OperatingBox;
+use App\Models\OperatingBoxHistorie;
 use App\Models\FinancialTransactions;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -26,7 +27,6 @@ class RendicionCajaOperativasController extends Controller
             $fechaInicio = $request->fecha_inicio;
             $fechaFin = $request->fecha_fin;
 
-            // Obtener todas las cajas operativas activas
             $cajas = OperatingBox::where('estado', true)->get();
 
             $resultados = [];
@@ -44,18 +44,17 @@ class RendicionCajaOperativasController extends Controller
                     ->whereBetween('fecha', [$fechaInicio, $fechaFin])
                     ->sum('importe_total');
 
-                // 2. Ingresos desde MovementsBox - USANDO EL SCOPE deCaja()
-                $ingresosMovementsBox = MovementsBox::deCaja($caja->id)
-                    ->entreFechas($fechaInicio, $fechaFin)
-                    ->where('tipo', 'ingreso')
+                // 2. Ingresos desde OperatingBoxHistorie (historial de movimientos de la caja)
+                $ingresosHistorial = OperatingBoxHistorie::where('operating_box_id', $caja->id)
+                    ->where('tipo_movimiento', 'ingreso')
+                    ->whereBetween('created_at', [$fechaInicio . ' 00:00:00', $fechaFin . ' 23:59:59'])
                     ->sum('monto');
 
-                // Total de ingresos = suma de ambas fuentes
-                $totalIngresos = $ingresosFinancialTransactions + $ingresosMovementsBox;
+                $totalIngresos = $ingresosFinancialTransactions + $ingresosHistorial;
 
                 Log::info("📊 Ingresos de caja {$caja->nombre}", [
                     'ingresosFinancialTransactions' => $ingresosFinancialTransactions,
-                    'ingresosMovementsBox' => $ingresosMovementsBox,
+                    'ingresosHistorial' => $ingresosHistorial,
                     'totalIngresos' => $totalIngresos
                 ]);
 
@@ -63,24 +62,21 @@ class RendicionCajaOperativasController extends Controller
                 // CALCULAR EGRESOS
                 // ==============================================================
 
-                // Egresos desde FinancialTransactions
                 $egresosFinancialTransactions = FinancialTransactions::where('caja_operativa_id', $caja->id)
                     ->where('tipo_de_transaccion', 'Egreso')
                     ->whereBetween('fecha', [$fechaInicio, $fechaFin])
                     ->sum('importe_total');
 
-                // Egresos desde MovementsBox - USANDO EL SCOPE deCaja()
-                $egresosMovementsBox = MovementsBox::deCaja($caja->id)
-                    ->entreFechas($fechaInicio, $fechaFin)
-                    ->where('tipo', 'egreso')
+                $egresosHistorial = OperatingBoxHistorie::where('operating_box_id', $caja->id)
+                    ->where('tipo_movimiento', 'egreso')
+                    ->whereBetween('created_at', [$fechaInicio . ' 00:00:00', $fechaFin . ' 23:59:59'])
                     ->sum('monto');
 
-                // Total de egresos
-                $totalEgresos = abs($egresosFinancialTransactions) + abs($egresosMovementsBox);
+                $totalEgresos = abs($egresosFinancialTransactions) + abs($egresosHistorial);
 
                 Log::info("📊 Egresos de caja {$caja->nombre}", [
                     'egresosFinancialTransactions' => $egresosFinancialTransactions,
-                    'egresosMovementsBox' => $egresosMovementsBox,
+                    'egresosHistorial' => $egresosHistorial,
                     'totalEgresos' => $totalEgresos
                 ]);
 
@@ -93,7 +89,6 @@ class RendicionCajaOperativasController extends Controller
                 // OBTENER DETALLE DE INGRESOS
                 // ==============================================================
 
-                // Ingresos desde FinancialTransactions
                 $ingresosTransacciones = FinancialTransactions::where('caja_operativa_id', $caja->id)
                     ->where('tipo_de_transaccion', 'Ingreso')
                     ->whereBetween('fecha', [$fechaInicio, $fechaFin])
@@ -117,33 +112,31 @@ class RendicionCajaOperativasController extends Controller
                         ];
                     });
 
-                // Ingresos desde MovementsBox - USANDO EL SCOPE deCaja()
-                $ingresosMovimientos = MovementsBox::deCaja($caja->id)
-                    ->entreFechas($fechaInicio, $fechaFin)
-                    ->where('tipo', 'ingreso')
-                    ->with(['transaccionFinanciera'])
+                $ingresosHistorialDetalle = OperatingBoxHistorie::where('operating_box_id', $caja->id)
+                    ->where('tipo_movimiento', 'ingreso')
+                    ->whereBetween('created_at', [$fechaInicio . ' 00:00:00', $fechaFin . ' 23:59:59'])
+                    ->with(['financialTransaction'])
                     ->get()
-                    ->map(function ($movimiento) {
+                    ->map(function ($historial) {
                         return [
-                            'id' => $movimiento->id,
-                            'tipo_fuente' => 'Movimiento de Caja',
-                            'item' => $movimiento->descripcion,
-                            'fecha' => $movimiento->fecha_movimiento,
-                            'monto' => floatval($movimiento->monto),
-                            'categoria' => 'Movimiento Manual',
+                            'id' => $historial->id,
+                            'tipo_fuente' => 'Historial Caja Operativa',
+                            'item' => $historial->descripcion ?? 'Recarga de caja',
+                            'fecha' => $historial->created_at->format('Y-m-d'),
+                            'monto' => floatval($historial->monto),
+                            'categoria' => 'Movimiento de Caja',
                             'vehiculo' => 'N/A',
-                            'observaciones' => $movimiento->descripcion ?? '',
+                            'observaciones' => $historial->descripcion ?? '',
                             'usuario' => 'Sistema'
                         ];
                     });
 
-                $detalleIngresos = $ingresosTransacciones->merge($ingresosMovimientos)->sortByDesc('fecha')->values();
+                $detalleIngresos = $ingresosTransacciones->merge($ingresosHistorialDetalle)->sortByDesc('fecha')->values();
 
                 // ==============================================================
                 // OBTENER DETALLE DE EGRESOS
                 // ==============================================================
 
-                // Egresos desde FinancialTransactions
                 $egresosTransacciones = FinancialTransactions::where('caja_operativa_id', $caja->id)
                     ->where('tipo_de_transaccion', 'Egreso')
                     ->whereBetween('fecha', [$fechaInicio, $fechaFin])
@@ -155,7 +148,7 @@ class RendicionCajaOperativasController extends Controller
                             'tipo_fuente' => 'Transacción Financiera',
                             'item' => $transaccion->item,
                             'fecha' => $transaccion->fecha,
-                            'monto' => floatval($transaccion->importe_total),
+                            'monto' => floatval(abs($transaccion->importe_total)),
                             'categoria' => $transaccion->categoria->nombre ?? 'Sin categoría',
                             'vehiculo' => $transaccion->vehicle ?
                                 "{$transaccion->vehicle->codigo_unico} - {$transaccion->vehicle->numero_placa}" :
@@ -167,27 +160,26 @@ class RendicionCajaOperativasController extends Controller
                         ];
                     });
 
-                // Egresos desde MovementsBox - USANDO EL SCOPE deCaja()
-                $egresosMovimientos = MovementsBox::deCaja($caja->id)
-                    ->entreFechas($fechaInicio, $fechaFin)
-                    ->where('tipo', 'egreso')
-                    ->with(['transaccionFinanciera'])
+                $egresosHistorialDetalle = OperatingBoxHistorie::where('operating_box_id', $caja->id)
+                    ->where('tipo_movimiento', 'egreso')
+                    ->whereBetween('created_at', [$fechaInicio . ' 00:00:00', $fechaFin . ' 23:59:59'])
+                    ->with(['financialTransaction'])
                     ->get()
-                    ->map(function ($movimiento) {
+                    ->map(function ($historial) {
                         return [
-                            'id' => $movimiento->id,
-                            'tipo_fuente' => 'Movimiento de Caja',
-                            'item' => $movimiento->descripcion,
-                            'fecha' => $movimiento->fecha_movimiento,
-                            'monto' => abs(floatval($movimiento->monto)),
-                            'categoria' => 'Movimiento Manual',
+                            'id' => $historial->id,
+                            'tipo_fuente' => 'Historial Caja Operativa',
+                            'item' => $historial->descripcion ?? 'Retiro de caja',
+                            'fecha' => $historial->created_at->format('Y-m-d'),
+                            'monto' => floatval(abs($historial->monto)),
+                            'categoria' => 'Movimiento de Caja',
                             'vehiculo' => 'N/A',
-                            'observaciones' => $movimiento->descripcion ?? '',
+                            'observaciones' => $historial->descripcion ?? '',
                             'usuario' => 'Sistema'
                         ];
                     });
 
-                $detalleEgresos = $egresosTransacciones->merge($egresosMovimientos)->sortByDesc('fecha')->values();
+                $detalleEgresos = $egresosTransacciones->merge($egresosHistorialDetalle)->sortByDesc('fecha')->values();
 
                 // ==============================================================
                 // CONSTRUIR RESULTADO
@@ -214,7 +206,15 @@ class RendicionCajaOperativasController extends Controller
                         'cantidad_egresos' => $detalleEgresos->count(),
                     ],
                     'detalle_ingresos' => $detalleIngresos,
-                    'detalle_egresos' => $detalleEgresos
+                    'detalle_egresos' => $detalleEgresos,
+                    'fuentes_ingresos' => [
+                        'financial_transactions' => floatval($ingresosFinancialTransactions),
+                        'historial_caja' => floatval($ingresosHistorial)
+                    ],
+                    'fuentes_egresos' => [
+                        'financial_transactions' => floatval(abs($egresosFinancialTransactions)),
+                        'historial_caja' => floatval(abs($egresosHistorial))
+                    ]
                 ];
             }
 
@@ -255,13 +255,10 @@ class RendicionCajaOperativasController extends Controller
             $fechaInicio = $request->fecha_inicio;
             $fechaFin = $request->fecha_fin;
 
-            // Obtener datos para exportar
             $datos = $this->obtenerDatosParaExportar($fechaInicio, $fechaFin);
 
-            // Generar nombre de archivo
             $nombreArchivo = 'Rendicion_Cajas_Operativas_' . $fechaInicio . '_al_' . $fechaFin . '.xlsx';
 
-            // Exportar a Excel
             return Excel::download(
                 new RendicionCajaOperativaExport($datos),
                 $nombreArchivo
@@ -290,27 +287,22 @@ class RendicionCajaOperativasController extends Controller
             $fechaInicio = $request->fecha_inicio;
             $fechaFin = $request->fecha_fin;
 
-            // Obtener datos para exportar
             $datos = $this->obtenerDatosParaExportar($fechaInicio, $fechaFin);
 
-            // Generar nombre de archivo
             $nombreArchivo = 'Rendicion_Cajas_Operativas_' . $fechaInicio . '_al_' . $fechaFin . '.pdf';
 
-            // Generar PDF
             $pdf = PDF::loadView('pdf.rendicion_cajas_operativas', [
                 'datos' => $datos,
                 'fechaInicio' => $fechaInicio,
                 'fechaFin' => $fechaFin
             ]);
 
-            // Opciones para el PDF
             $pdf->setPaper('a4', 'landscape');
             $pdf->setOptions([
                 'isHtml5ParserEnabled' => true,
                 'isRemoteEnabled' => true
             ]);
 
-            // Descargar PDF
             return $pdf->download($nombreArchivo);
         } catch (\Exception $e) {
             Log::error('Error al exportar PDF', [
@@ -325,48 +317,39 @@ class RendicionCajaOperativasController extends Controller
         }
     }
 
-    /**
-     * Método privado para obtener datos para exportar
-     */
     private function obtenerDatosParaExportar($fechaInicio, $fechaFin)
     {
-        // Obtener todas las cajas operativas
         $cajas = OperatingBox::where('estado', true)->get();
 
         $resultados = [];
 
         foreach ($cajas as $caja) {
-            // Ingresos desde FinancialTransactions
             $ingresosFinancialTransactions = FinancialTransactions::where('caja_operativa_id', $caja->id)
                 ->where('tipo_de_transaccion', 'Ingreso')
                 ->whereBetween('fecha', [$fechaInicio, $fechaFin])
                 ->sum('importe_total');
 
-            // Ingresos desde MovementsBox - USANDO EL SCOPE deCaja()
-            $ingresosMovementsBox = MovementsBox::deCaja($caja->id)
-                ->entreFechas($fechaInicio, $fechaFin)
-                ->where('tipo', 'ingreso')
+            $ingresosHistorial = OperatingBoxHistorie::where('operating_box_id', $caja->id)
+                ->where('tipo_movimiento', 'ingreso')
+                ->whereBetween('created_at', [$fechaInicio . ' 00:00:00', $fechaFin . ' 23:59:59'])
                 ->sum('monto');
 
-            $totalIngresos = $ingresosFinancialTransactions + $ingresosMovementsBox;
+            $totalIngresos = $ingresosFinancialTransactions + $ingresosHistorial;
 
-            // Egresos desde FinancialTransactions
             $egresosFinancialTransactions = FinancialTransactions::where('caja_operativa_id', $caja->id)
                 ->where('tipo_de_transaccion', 'Egreso')
                 ->whereBetween('fecha', [$fechaInicio, $fechaFin])
                 ->sum('importe_total');
 
-            // Egresos desde MovementsBox - USANDO EL SCOPE deCaja()
-            $egresosMovementsBox = MovementsBox::deCaja($caja->id)
-                ->entreFechas($fechaInicio, $fechaFin)
-                ->where('tipo', 'egreso')
+            $egresosHistorial = OperatingBoxHistorie::where('operating_box_id', $caja->id)
+                ->where('tipo_movimiento', 'egreso')
+                ->whereBetween('created_at', [$fechaInicio . ' 00:00:00', $fechaFin . ' 23:59:59'])
                 ->sum('monto');
 
-            $totalEgresos = abs($egresosFinancialTransactions) + abs($egresosMovementsBox);
+            $totalEgresos = abs($egresosFinancialTransactions) + abs($egresosHistorial);
 
             $saldoFinal = $totalIngresos - $totalEgresos;
 
-            // Obtener detalles de ingresos para el reporte
             $ingresos = FinancialTransactions::where('caja_operativa_id', $caja->id)
                 ->where('tipo_de_transaccion', 'Ingreso')
                 ->whereBetween('fecha', [$fechaInicio, $fechaFin])
@@ -386,7 +369,6 @@ class RendicionCajaOperativasController extends Controller
                     ];
                 });
 
-            // Obtener detalles de egresos para el reporte
             $egresos = FinancialTransactions::where('caja_operativa_id', $caja->id)
                 ->where('tipo_de_transaccion', 'Egreso')
                 ->whereBetween('fecha', [$fechaInicio, $fechaFin])
