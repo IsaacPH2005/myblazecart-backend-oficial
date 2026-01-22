@@ -85,13 +85,10 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/create', [InvestmentController::class, 'create']);
             Route::get('/statistics', [InvestmentController::class, 'statistics']);
             Route::post('/', [InvestmentController::class, 'store']);
+            Route::get('/user/{userId}', [InvestmentController::class, 'byUser']);
             Route::get('/{id}', [InvestmentController::class, 'show']);
             Route::put('/{id}', [InvestmentController::class, 'update']);
             Route::delete('/{id}', [InvestmentController::class, 'destroy']);
-
-            Route::get('/user/{userId}', [InvestmentController::class, 'byUser']);
-            Route::get('/business/{businessId}', [InvestmentController::class, 'byBusiness']);
-            Route::get('/vehicle/{vehicleId}', [InvestmentController::class, 'byVehicle']);
             Route::patch('/{id}/status', [InvestmentController::class, 'changeStatus']);
             Route::patch('/{id}/toggle-active', [InvestmentController::class, 'toggleActive']);
         });

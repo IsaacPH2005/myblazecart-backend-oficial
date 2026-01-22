@@ -8,6 +8,7 @@ use App\Models\Investment;
 use App\Models\User;
 use App\Models\Vehicle;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -15,11 +16,111 @@ use Illuminate\Support\Facades\Validator;
 class InvestmentController extends Controller
 {
     /**
-     * Mostrar listado de inversiones
+     * 🎯 ENDPOINT PARA EL PANEL DEL INVERSIONISTA (Usuario logueado)
+     * GET /api/my-investments
+     */
+    public function myInvestments(Request $request)
+    {
+        try {
+            $user = Auth::user();
+
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuario no autenticado'
+                ], 401);
+            }
+
+            Log::info('🔍 Panel Inversionista - Usuario:', [
+                'user_id' => $user->id,
+                'email' => $user->email
+            ]);
+
+            // Obtener inversiones del usuario autenticado
+            $investments = Investment::with(['vehicle', 'business'])
+                ->where('user_id', $user->id)
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            Log::info('📊 Inversiones encontradas:', [
+                'count' => $investments->count(),
+                'user_id' => $user->id
+            ]);
+
+            // Calcular totales
+            $totalInvertido = $investments->sum('monto_inversion');
+
+            // Formatear inversiones
+            $formattedInvestments = $investments->map(function ($investment) {
+                return [
+                    'id' => $investment->id,
+                    'vehicle' => $investment->vehicle ? [
+                        'id' => $investment->vehicle->id,
+                        'numero_placa' => $investment->vehicle->numero_placa ?? 'N/A',
+                        'marca' => $investment->vehicle->marca ?? 'N/A',
+                        'modelo' => $investment->vehicle->modelo ?? 'N/A',
+                        'año' => $investment->vehicle->año ?? null,
+                        'codigo_unico' => $investment->vehicle->codigo_unico ?? 'N/A',
+                        'nombre_completo' => trim(($investment->vehicle->marca ?? '') . ' ' . ($investment->vehicle->modelo ?? '') . ' - ' . ($investment->vehicle->numero_placa ?? '')),
+                    ] : [
+                        'id' => null,
+                        'numero_placa' => 'Sin vehículo',
+                        'marca' => 'N/A',
+                        'modelo' => 'N/A',
+                        'nombre_completo' => 'Sin vehículo asignado'
+                    ],
+                    'business' => $investment->business ? [
+                        'id' => $investment->business->id,
+                        'nombre' => $investment->business->nombre,
+                    ] : [
+                        'id' => null,
+                        'nombre' => 'Sin negocio'
+                    ],
+                    'monto_inversion' => floatval($investment->monto_inversion),
+                    'descripcion' => $investment->descripcion ?? '',
+                    'notas' => $investment->notas ?? '',
+                    'active' => (bool)$investment->active,
+                    'estado' => $investment->estado,
+                    'fecha_inversion' => $investment->created_at?->format('Y-m-d') ?? null,
+                    'created_at' => $investment->created_at?->format('Y-m-d H:i:s') ?? null,
+                    'updated_at' => $investment->updated_at?->format('Y-m-d H:i:s') ?? null,
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $formattedInvestments,
+                'resumen' => [
+                    'total_invertido' => floatval($totalInvertido),
+                    'utilidad_total' => 0, // Aquí puedes calcular utilidades si tienes ese campo
+                    'cantidad_inversiones' => $investments->count(),
+                    'inversiones_activas' => $investments->where('active', true)->count(),
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('❌ Error en myInvestments:', [
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener inversiones',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * 🎯 LISTADO DE TODAS LAS INVERSIONES (Admin)
+     * GET /api/investments
      */
     public function index()
     {
         try {
+            Log::info('🔍 Admin - Listando todas las inversiones');
+
             $investments = Investment::with([
                 'user.generalData',
                 'vehicle',
@@ -28,7 +129,9 @@ class InvestmentController extends Controller
                 ->orderBy('created_at', 'desc')
                 ->paginate(15);
 
-            // Formatear datos para incluir información del inversionista
+            Log::info('📊 Total inversiones:', ['count' => $investments->total()]);
+
+            // Formatear datos
             $investments->getCollection()->transform(function ($investment) {
                 return [
                     'id' => $investment->id,
@@ -37,7 +140,7 @@ class InvestmentController extends Controller
                     'business_id' => $investment->business_id,
                     'inversionista' => [
                         'id' => $investment->user?->id,
-                        'email' => $investment->user?->email,
+                        'email' => $investment->user?->email ?? 'Sin email',
                         'nombre_completo' => $investment->user?->generalData
                             ? trim($investment->user->generalData->nombre . ' ' . $investment->user->generalData->apellido)
                             : 'Sin nombre',
@@ -48,19 +151,19 @@ class InvestmentController extends Controller
                     ],
                     'vehicle' => $investment->vehicle ? [
                         'id' => $investment->vehicle->id,
-                        'numero_placa' => $investment->vehicle->numero_placa,
-                        'marca' => $investment->vehicle->marca,
-                        'modelo' => $investment->vehicle->modelo,
-                        'año' => $investment->vehicle->año,
-                        'codigo_unico' => $investment->vehicle->codigo_unico,
+                        'numero_placa' => $investment->vehicle->numero_placa ?? 'N/A',
+                        'marca' => $investment->vehicle->marca ?? 'N/A',
+                        'modelo' => $investment->vehicle->modelo ?? 'N/A',
+                        'año' => $investment->vehicle->año ?? null,
+                        'codigo_unico' => $investment->vehicle->codigo_unico ?? 'N/A',
                     ] : null,
                     'business' => $investment->business ? [
                         'id' => $investment->business->id,
                         'nombre' => $investment->business->nombre,
                     ] : null,
                     'monto_inversion' => floatval($investment->monto_inversion),
-                    'descripcion' => $investment->descripcion,
-                    'notas' => $investment->notas,
+                    'descripcion' => $investment->descripcion ?? '',
+                    'notas' => $investment->notas ?? '',
                     'active' => (bool)$investment->active,
                     'estado' => $investment->estado,
                     'created_at' => $investment->created_at?->format('Y-m-d H:i:s'),
@@ -80,7 +183,12 @@ class InvestmentController extends Controller
                 ]
             ]);
         } catch (\Exception $e) {
-            Log::error('Error en InvestmentController@index: ' . $e->getMessage());
+            Log::error('❌ Error en index:', [
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error al obtener inversiones',
@@ -90,7 +198,7 @@ class InvestmentController extends Controller
     }
 
     /**
-     * Mostrar formulario de creación - Obtener datos necesarios
+     * Obtener datos para formulario de creación
      */
     public function create()
     {
@@ -142,7 +250,7 @@ class InvestmentController extends Controller
                 ]
             ]);
         } catch (\Exception $e) {
-            Log::error('Error en InvestmentController@create: ' . $e->getMessage());
+            Log::error('Error en create: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Error al obtener datos',
@@ -186,47 +294,23 @@ class InvestmentController extends Controller
                 'descripcion' => $request->descripcion,
                 'notas' => $request->notas,
                 'active' => $request->active ?? true,
-                'estado' => $request->estado ?? 'pendiente',
+                'estado' => $request->estado ?? 'activo',
             ]);
 
-            $investment->load(['user.generalData', 'vehicle', 'business']);
+            Log::info('✅ Inversión creada:', ['id' => $investment->id]);
 
-            // Formatear respuesta
-            $formattedInvestment = [
-                'id' => $investment->id,
-                'user_id' => $investment->user_id,
-                'vehicle_id' => $investment->vehicle_id,
-                'business_id' => $investment->business_id,
-                'inversionista' => [
-                    'id' => $investment->user?->id,
-                    'email' => $investment->user?->email,
-                    'nombre_completo' => $investment->user?->generalData
-                        ? trim($investment->user->generalData->nombre . ' ' . $investment->user->generalData->apellido)
-                        : 'Sin nombre',
-                    'documento_identidad' => $investment->user?->generalData?->documento_identidad,
-                    'celular' => $investment->user?->generalData?->celular,
-                ],
-                'vehicle' => $investment->vehicle,
-                'business' => $investment->business,
-                'monto_inversion' => floatval($investment->monto_inversion),
-                'descripcion' => $investment->descripcion,
-                'notas' => $investment->notas,
-                'active' => (bool)$investment->active,
-                'estado' => $investment->estado,
-                'created_at' => $investment->created_at?->format('Y-m-d H:i:s'),
-                'updated_at' => $investment->updated_at?->format('Y-m-d H:i:s'),
-            ];
+            $investment->load(['user.generalData', 'vehicle', 'business']);
 
             DB::commit();
 
             return response()->json([
                 'success' => true,
                 'message' => 'Inversión creada exitosamente',
-                'data' => $formattedInvestment
+                'data' => $investment
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Error en InvestmentController@store: ' . $e->getMessage());
+            Log::error('Error en store: ' . $e->getMessage());
 
             return response()->json([
                 'success' => false,
@@ -251,45 +335,12 @@ class InvestmentController extends Controller
                 ], 404);
             }
 
-            // Formatear respuesta
-            $formattedInvestment = [
-                'id' => $investment->id,
-                'user_id' => $investment->user_id,
-                'vehicle_id' => $investment->vehicle_id,
-                'business_id' => $investment->business_id,
-                'inversionista' => [
-                    'id' => $investment->user?->id,
-                    'email' => $investment->user?->email,
-                    'nombre_completo' => $investment->user?->generalData
-                        ? trim($investment->user->generalData->nombre . ' ' . $investment->user->generalData->apellido)
-                        : 'Sin nombre',
-                    'documento_identidad' => $investment->user?->generalData?->documento_identidad,
-                    'celular' => $investment->user?->generalData?->celular,
-                    'direccion' => $investment->user?->generalData?->direccion,
-                    'ciudad' => $investment->user?->generalData?->ciudad,
-                    'departamento' => $investment->user?->generalData?->departamento,
-                    'contacto_emergencia' => [
-                        'nombre' => $investment->user?->generalData?->contacto_emergencia_nombre,
-                        'telefono' => $investment->user?->generalData?->contacto_emergencia_telefono,
-                    ],
-                ],
-                'vehicle' => $investment->vehicle,
-                'business' => $investment->business,
-                'monto_inversion' => floatval($investment->monto_inversion),
-                'descripcion' => $investment->descripcion,
-                'notas' => $investment->notas,
-                'active' => (bool)$investment->active,
-                'estado' => $investment->estado,
-                'created_at' => $investment->created_at?->format('Y-m-d H:i:s'),
-                'updated_at' => $investment->updated_at?->format('Y-m-d H:i:s'),
-            ];
-
             return response()->json([
                 'success' => true,
-                'data' => $formattedInvestment
+                'data' => $investment
             ]);
         } catch (\Exception $e) {
-            Log::error('Error en InvestmentController@show: ' . $e->getMessage());
+            Log::error('Error en show: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Error al obtener la inversión',
@@ -333,46 +384,18 @@ class InvestmentController extends Controller
 
         try {
             DB::beginTransaction();
-
             $investment->update($request->all());
             $investment->load(['user.generalData', 'vehicle', 'business']);
-
-            // Formatear respuesta
-            $formattedInvestment = [
-                'id' => $investment->id,
-                'user_id' => $investment->user_id,
-                'vehicle_id' => $investment->vehicle_id,
-                'business_id' => $investment->business_id,
-                'inversionista' => [
-                    'id' => $investment->user?->id,
-                    'email' => $investment->user?->email,
-                    'nombre_completo' => $investment->user?->generalData
-                        ? trim($investment->user->generalData->nombre . ' ' . $investment->user->generalData->apellido)
-                        : 'Sin nombre',
-                    'documento_identidad' => $investment->user?->generalData?->documento_identidad,
-                    'celular' => $investment->user?->generalData?->celular,
-                ],
-                'vehicle' => $investment->vehicle,
-                'business' => $investment->business,
-                'monto_inversion' => floatval($investment->monto_inversion),
-                'descripcion' => $investment->descripcion,
-                'notas' => $investment->notas,
-                'active' => (bool)$investment->active,
-                'estado' => $investment->estado,
-                'created_at' => $investment->created_at?->format('Y-m-d H:i:s'),
-                'updated_at' => $investment->updated_at?->format('Y-m-d H:i:s'),
-            ];
-
             DB::commit();
 
             return response()->json([
                 'success' => true,
                 'message' => 'Inversión actualizada exitosamente',
-                'data' => $formattedInvestment
+                'data' => $investment
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Error en InvestmentController@update: ' . $e->getMessage());
+            Log::error('Error en update: ' . $e->getMessage());
 
             return response()->json([
                 'success' => false,
@@ -404,7 +427,7 @@ class InvestmentController extends Controller
                 'message' => 'Inversión eliminada exitosamente'
             ]);
         } catch (\Exception $e) {
-            Log::error('Error en InvestmentController@destroy: ' . $e->getMessage());
+            Log::error('Error en destroy: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Error al eliminar la inversión',
@@ -414,7 +437,7 @@ class InvestmentController extends Controller
     }
 
     /**
-     * Obtener inversiones de un usuario específico
+     * Inversiones por usuario
      */
     public function byUser($userId)
     {
@@ -435,21 +458,6 @@ class InvestmentController extends Controller
 
             $total = $investments->sum('monto_inversion');
 
-            // Formatear inversiones
-            $formattedInvestments = $investments->map(function ($investment) {
-                return [
-                    'id' => $investment->id,
-                    'vehicle' => $investment->vehicle,
-                    'business' => $investment->business,
-                    'monto_inversion' => floatval($investment->monto_inversion),
-                    'descripcion' => $investment->descripcion,
-                    'notas' => $investment->notas,
-                    'active' => (bool)$investment->active,
-                    'estado' => $investment->estado,
-                    'created_at' => $investment->created_at?->format('Y-m-d H:i:s'),
-                ];
-            });
-
             return response()->json([
                 'success' => true,
                 'inversionista' => [
@@ -458,17 +466,13 @@ class InvestmentController extends Controller
                     'nombre_completo' => $user->generalData
                         ? trim($user->generalData->nombre . ' ' . $user->generalData->apellido)
                         : 'Sin nombre',
-                    'documento_identidad' => $user->generalData?->documento_identidad,
-                    'celular' => $user->generalData?->celular,
-                    'ciudad' => $user->generalData?->ciudad,
                 ],
-                'inversiones' => $formattedInvestments,
+                'inversiones' => $investments,
                 'total_invertido' => floatval($total),
                 'cantidad_inversiones' => $investments->count(),
-                'inversiones_activas' => $investments->where('active', true)->count(),
             ]);
         } catch (\Exception $e) {
-            Log::error('Error en InvestmentController@byUser: ' . $e->getMessage());
+            Log::error('Error en byUser: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Error al obtener inversiones del usuario',
@@ -478,129 +482,7 @@ class InvestmentController extends Controller
     }
 
     /**
-     * Obtener inversiones de un negocio específico
-     */
-    public function byBusiness($businessId)
-    {
-        try {
-            $business = Business::find($businessId);
-
-            if (!$business) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Negocio no encontrado'
-                ], 404);
-            }
-
-            $investments = Investment::with(['user.generalData', 'vehicle'])
-                ->where('business_id', $businessId)
-                ->orderBy('created_at', 'desc')
-                ->get();
-
-            $total = $investments->sum('monto_inversion');
-
-            // Formatear inversiones con datos de inversionistas
-            $formattedInvestments = $investments->map(function ($investment) {
-                return [
-                    'id' => $investment->id,
-                    'inversionista' => [
-                        'id' => $investment->user?->id,
-                        'email' => $investment->user?->email,
-                        'nombre_completo' => $investment->user?->generalData
-                            ? trim($investment->user->generalData->nombre . ' ' . $investment->user->generalData->apellido)
-                            : 'Sin nombre',
-                        'documento_identidad' => $investment->user?->generalData?->documento_identidad,
-                        'celular' => $investment->user?->generalData?->celular,
-                    ],
-                    'vehicle' => $investment->vehicle,
-                    'monto_inversion' => floatval($investment->monto_inversion),
-                    'descripcion' => $investment->descripcion,
-                    'active' => (bool)$investment->active,
-                    'estado' => $investment->estado,
-                    'created_at' => $investment->created_at?->format('Y-m-d H:i:s'),
-                ];
-            });
-
-            return response()->json([
-                'success' => true,
-                'business' => $business,
-                'inversiones' => $formattedInvestments,
-                'total_invertido' => floatval($total),
-                'cantidad_inversionistas' => $investments->unique('user_id')->count(),
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Error en InvestmentController@byBusiness: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error al obtener inversiones del negocio',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Obtener inversiones de un vehículo específico
-     */
-    public function byVehicle($vehicleId)
-    {
-        try {
-            $vehicle = Vehicle::find($vehicleId);
-
-            if (!$vehicle) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Vehículo no encontrado'
-                ], 404);
-            }
-
-            $investments = Investment::with(['user.generalData', 'business'])
-                ->where('vehicle_id', $vehicleId)
-                ->orderBy('created_at', 'desc')
-                ->get();
-
-            $total = $investments->sum('monto_inversion');
-
-            // Formatear inversiones con datos de inversionistas
-            $formattedInvestments = $investments->map(function ($investment) {
-                return [
-                    'id' => $investment->id,
-                    'inversionista' => [
-                        'id' => $investment->user?->id,
-                        'email' => $investment->user?->email,
-                        'nombre_completo' => $investment->user?->generalData
-                            ? trim($investment->user->generalData->nombre . ' ' . $investment->user->generalData->apellido)
-                            : 'Sin nombre',
-                        'documento_identidad' => $investment->user?->generalData?->documento_identidad,
-                        'celular' => $investment->user?->generalData?->celular,
-                    ],
-                    'business' => $investment->business,
-                    'monto_inversion' => floatval($investment->monto_inversion),
-                    'descripcion' => $investment->descripcion,
-                    'active' => (bool)$investment->active,
-                    'estado' => $investment->estado,
-                    'created_at' => $investment->created_at?->format('Y-m-d H:i:s'),
-                ];
-            });
-
-            return response()->json([
-                'success' => true,
-                'vehicle' => $vehicle,
-                'inversiones' => $formattedInvestments,
-                'total_invertido' => floatval($total),
-                'cantidad_inversionistas' => $investments->unique('user_id')->count(),
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Error en InvestmentController@byVehicle: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error al obtener inversiones del vehículo',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Cambiar estado de la inversión
+     * Cambiar estado
      */
     public function changeStatus(Request $request, $id)
     {
@@ -628,15 +510,13 @@ class InvestmentController extends Controller
             $investment->estado = $request->estado;
             $investment->save();
 
-            $investment->load(['user.generalData', 'vehicle', 'business']);
-
             return response()->json([
                 'success' => true,
                 'message' => 'Estado actualizado exitosamente',
                 'data' => $investment
             ]);
         } catch (\Exception $e) {
-            Log::error('Error en InvestmentController@changeStatus: ' . $e->getMessage());
+            Log::error('Error en changeStatus: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Error al cambiar el estado',
@@ -646,7 +526,7 @@ class InvestmentController extends Controller
     }
 
     /**
-     * Activar/Desactivar inversión
+     * Toggle active
      */
     public function toggleActive($id)
     {
@@ -663,25 +543,23 @@ class InvestmentController extends Controller
             $investment->active = !$investment->active;
             $investment->save();
 
-            $investment->load(['user.generalData', 'vehicle', 'business']);
-
             return response()->json([
                 'success' => true,
                 'message' => $investment->active ? 'Inversión activada' : 'Inversión desactivada',
                 'data' => $investment
             ]);
         } catch (\Exception $e) {
-            Log::error('Error en InvestmentController@toggleActive: ' . $e->getMessage());
+            Log::error('Error en toggleActive: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
-                'message' => 'Error al cambiar estado activo',
+                'message' => 'Error al cambiar estado',
                 'error' => $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Obtener estadísticas generales de inversiones
+     * Estadísticas
      */
     public function statistics()
     {
@@ -689,26 +567,6 @@ class InvestmentController extends Controller
             $totalInversiones = Investment::count();
             $totalMonto = Investment::sum('monto_inversion');
             $inversionesActivas = Investment::where('active', true)->count();
-            $inversionesPorEstado = Investment::select('estado', DB::raw('count(*) as total'))
-                ->groupBy('estado')
-                ->get();
-
-            $topInversionistas = Investment::select('user_id', DB::raw('SUM(monto_inversion) as total_invertido'))
-                ->with('user.generalData')
-                ->groupBy('user_id')
-                ->orderBy('total_invertido', 'desc')
-                ->limit(10)
-                ->get()
-                ->map(function ($investment) {
-                    return [
-                        'id' => $investment->user?->id,
-                        'nombre_completo' => $investment->user?->generalData
-                            ? trim($investment->user->generalData->nombre . ' ' . $investment->user->generalData->apellido)
-                            : 'Sin nombre',
-                        'email' => $investment->user?->email,
-                        'total_invertido' => floatval($investment->total_invertido),
-                    ];
-                });
 
             return response()->json([
                 'success' => true,
@@ -716,12 +574,10 @@ class InvestmentController extends Controller
                     'total_inversiones' => $totalInversiones,
                     'total_monto_invertido' => floatval($totalMonto),
                     'inversiones_activas' => $inversionesActivas,
-                    'inversiones_por_estado' => $inversionesPorEstado,
-                    'top_inversionistas' => $topInversionistas,
                 ]
             ]);
         } catch (\Exception $e) {
-            Log::error('Error en InvestmentController@statistics: ' . $e->getMessage());
+            Log::error('Error en statistics: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Error al obtener estadísticas',
