@@ -16,12 +16,6 @@ use Maatwebsite\Excel\Facades\Excel;
 
 class IngresosPorNegocioController extends Controller
 {
-    /**
-     * Obtener vehículos por negocio
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
-     */
     public function getVehiclesByBusiness(Request $request)
     {
         try {
@@ -37,21 +31,20 @@ class IngresosPorNegocioController extends Controller
                 ], 422);
             }
 
-            $vehiculos = Vehicle::where('business_id', $request->negocio_id)
+            $vehiculos = Vehicle::where('negocio_id', $request->negocio_id)
                 ->where('estado', 'ACTIVO')
-                ->orderBy('placa')
+                ->orderBy('numero_placa')
                 ->get()
                 ->map(function ($vehiculo) {
                     return [
                         'id' => $vehiculo->id,
                         'codigo_unico' => $vehiculo->codigo_unico ?? $vehiculo->id,
-                        'placa' => $vehiculo->placa ?? $vehiculo->numero_placa,
+                        'placa' => $vehiculo->numero_placa,
                         'marca' => $vehiculo->marca,
                         'modelo' => $vehiculo->modelo,
-                        'año' => $vehiculo->año ?? $vehiculo->anio,
-                        'tipo_vehiculo' => $vehiculo->tipo_vehiculo ?? $vehiculo->tipo,
-                        'nombre_display' => ($vehiculo->placa ?? $vehiculo->numero_placa) . ' - ' .
-                            $vehiculo->marca . ' ' . $vehiculo->modelo,
+                        'año' => $vehiculo->año,
+                        'tipo_vehiculo' => $vehiculo->tipo_vehiculo,
+                        'nombre_display' => $vehiculo->numero_placa . ' - ' . $vehiculo->marca . ' ' . $vehiculo->modelo,
                     ];
                 });
 
@@ -68,20 +61,12 @@ class IngresosPorNegocioController extends Controller
         }
     }
 
-    /**
-     * Obtener ingresos por negocio filtrados por rango de fechas
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
-     */
     public function getIncomesByBusiness(Request $request)
     {
         try {
-            // Validar parámetros
             $validator = Validator::make($request->all(), [
                 'negocio_id' => 'nullable|exists:businesses,id',
-                'vehiculo_id' => 'nullable|exists:vehicles,id',
-                'vehicle_id' => 'nullable|exists:vehicles,id', // Alias para compatibilidad
+                'vehicle_id' => 'nullable|exists:vehicles,id',
                 'fecha_inicial' => 'required|date',
                 'fecha_final' => 'required|date|after_or_equal:fecha_inicial',
             ]);
@@ -95,50 +80,34 @@ class IngresosPorNegocioController extends Controller
             }
 
             $negocioId = $request->input('negocio_id');
-            $vehiculoId = $request->input('vehiculo_id') ?? $request->input('vehicle_id');
+            $vehicleId = $request->input('vehicle_id');
             $fechaInicial = $request->input('fecha_inicial');
             $fechaFinal = $request->input('fecha_final');
 
-            // Obtener información del negocio si se especificó
-            $negocio = null;
-            if ($negocioId) {
-                $negocio = Business::find($negocioId);
-            }
+            $negocio = $negocioId ? Business::find($negocioId) : null;
+            $vehiculo = $vehicleId ? Vehicle::with('negocio')->find($vehicleId) : null;
 
-            // Obtener información del vehículo si se especificó
-            $vehiculo = null;
-            if ($vehiculoId) {
-                $vehiculo = Vehicle::with('negocio')->find($vehiculoId);
-            }
-
-            // Construir consulta base para ingresos (EXCLUIR ingresos de caja operativa)
             $query = FinancialTransactions::where('tipo_de_transaccion', 'Ingreso')
-                ->whereNull('caja_operativa_id') // EXCLUIR ingresos de caja operativa (recargas internas)
+                ->whereNull('caja_operativa_id')
                 ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-                ->with(['categoria', 'negocio', 'vehiculo']);
+                ->with(['categoria', 'negocio', 'vehicle']);
 
-            // Aplicar filtro de negocio si se especificó
             if ($negocioId) {
                 $query->where('negocio_id', $negocioId);
             }
 
-            // Aplicar filtro de vehículo si se especificó
-            if ($vehiculoId) {
-                $query->where('vehiculo_id', $vehiculoId);
+            if ($vehicleId) {
+                $query->where('vehicle_id', $vehicleId);
             }
 
-            // Obtener los ingresos agrupados por negocio
             $ingresos = $query->get()
                 ->groupBy('negocio_id')
                 ->map(function ($negocioGroup, $negocioId) {
-                    // Verificar si el negocio existe antes de acceder a sus propiedades
                     $negocio = $negocioGroup->first()->negocio;
                     $negocioNombre = $negocio ? $negocio->nombre : 'Sin negocio';
 
-                    // Agrupar por categoría dentro de cada negocio
                     $categorias = $negocioGroup->groupBy('categoria_id')
                         ->map(function ($categoriaGroup) {
-                            // Verificar si la categoría existe antes de acceder a sus propiedades
                             $categoria = $categoriaGroup->first()->categoria;
                             $categoriaNombre = $categoria ? $categoria->nombre : 'Sin categoría';
                             $categoriaId = $categoria ? $categoria->id : null;
@@ -166,11 +135,9 @@ class IngresosPorNegocioController extends Controller
                     ];
                 });
 
-            // Calcular totales globales (con la misma exclusión de caja operativa)
             $totalGlobal = $query->sum('importe_total');
             $cantidadGlobal = $query->count();
 
-            // Obtener todos los negocios para mostrar incluso los que no tienen ingresos
             $todosNegocios = Business::all()
                 ->map(function ($negocio) use ($ingresos) {
                     $negocioIngresos = $ingresos->firstWhere('negocio_id', $negocio->id);
@@ -185,23 +152,20 @@ class IngresosPorNegocioController extends Controller
                     ];
                 });
 
-            // Preparar información del vehículo para la respuesta
             $vehiculoInfo = null;
             if ($vehiculo) {
                 $vehiculoInfo = [
                     'id' => $vehiculo->id,
                     'codigo_unico' => $vehiculo->codigo_unico ?? $vehiculo->id,
-                    'numero_placa' => $vehiculo->placa ?? $vehiculo->numero_placa,
+                    'numero_placa' => $vehiculo->numero_placa,
                     'marca' => $vehiculo->marca,
                     'modelo' => $vehiculo->modelo,
-                    'año' => $vehiculo->año ?? $vehiculo->anio,
-                    'tipo_vehiculo' => $vehiculo->tipo_vehiculo ?? $vehiculo->tipo,
-                    'nombre_display' => ($vehiculo->placa ?? $vehiculo->numero_placa) . ' - ' .
-                        $vehiculo->marca . ' ' . $vehiculo->modelo,
+                    'año' => $vehiculo->año,
+                    'tipo_vehiculo' => $vehiculo->tipo_vehiculo,
+                    'nombre_display' => $vehiculo->numero_placa . ' - ' . $vehiculo->marca . ' ' . $vehiculo->modelo,
                 ];
             }
 
-            // Preparar respuesta
             $response = [
                 'status' => 'success',
                 'message' => 'Ingresos por negocio obtenidos correctamente',
@@ -223,12 +187,8 @@ class IngresosPorNegocioController extends Controller
                     ],
                     'negocios' => $todosNegocios,
                     'estadisticas_adicionales' => [
-                        'negocio_mayor_ingreso' => $ingresos->sortByDesc(function ($negocio) {
-                            return $negocio['total_ingresos'];
-                        })->first(),
-                        'negocio_menor_ingreso' => $ingresos->sortBy(function ($negocio) {
-                            return $negocio['total_ingresos'];
-                        })->first(),
+                        'negocio_mayor_ingreso' => $ingresos->sortByDesc('total_ingresos')->first(),
+                        'negocio_menor_ingreso' => $ingresos->sortBy('total_ingresos')->first(),
                         'distribucion_porcentual' => $this->getDistribucionPorcentualIngresos($ingresos, $totalGlobal)
                     ]
                 ],
@@ -245,13 +205,6 @@ class IngresosPorNegocioController extends Controller
         }
     }
 
-    /**
-     * Obtener distribución porcentual de ingresos por negocio
-     *
-     * @param \Illuminate\Support\Collection $ingresos
-     * @param float $totalGlobal
-     * @return array
-     */
     private function getDistribucionPorcentualIngresos($ingresos, $totalGlobal)
     {
         if ($totalGlobal <= 0) {
@@ -268,59 +221,37 @@ class IngresosPorNegocioController extends Controller
         })->sortByDesc('porcentaje')->values()->all();
     }
 
-    /**
-     * Obtener datos procesados de ingresos por negocio (método auxiliar reutilizable)
-     *
-     * @param Request $request
-     * @return array
-     */
     private function getProcessedIncomesByBusiness(Request $request)
     {
         $negocioId = $request->input('negocio_id');
-        $vehiculoId = $request->input('vehiculo_id') ?? $request->input('vehicle_id');
+        $vehicleId = $request->input('vehicle_id');
         $fechaInicial = $request->input('fecha_inicial');
         $fechaFinal = $request->input('fecha_final');
 
-        // Obtener información del negocio si se especificó
-        $negocio = null;
-        if ($negocioId) {
-            $negocio = Business::find($negocioId);
-        }
+        $negocio = $negocioId ? Business::find($negocioId) : null;
+        $vehiculo = $vehicleId ? Vehicle::with('negocio')->find($vehicleId) : null;
 
-        // Obtener información del vehículo si se especificó
-        $vehiculo = null;
-        if ($vehiculoId) {
-            $vehiculo = Vehicle::with('negocio')->find($vehiculoId);
-        }
-
-        // Construir consulta base para ingresos (EXCLUIR ingresos de caja operativa)
         $query = FinancialTransactions::where('tipo_de_transaccion', 'Ingreso')
-            ->whereNull('caja_operativa_id') // EXCLUIR ingresos de caja operativa (recargas internas)
+            ->whereNull('caja_operativa_id')
             ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-            ->with(['categoria', 'negocio', 'vehiculo']);
+            ->with(['categoria', 'negocio', 'vehicle']);
 
-        // Aplicar filtro de negocio si se especificó
         if ($negocioId) {
             $query->where('negocio_id', $negocioId);
         }
 
-        // Aplicar filtro de vehículo si se especificó
-        if ($vehiculoId) {
-            $query->where('vehiculo_id', $vehiculoId);
+        if ($vehicleId) {
+            $query->where('vehicle_id', $vehicleId);
         }
 
-        // Obtener los ingresos agrupados por negocio
         $ingresos = $query->get()
             ->groupBy('negocio_id')
             ->map(function ($negocioGroup, $negocioId) {
-                // Verificar si el negocio existe antes de acceder a sus propiedades
                 $negocio = $negocioGroup->first()->negocio;
                 $negocioNombre = $negocio ? $negocio->nombre : 'Sin negocio';
 
-                // Agrupar por categoría dentro de cada negocio
                 $categorias = $negocioGroup->groupBy('categoria_id')
                     ->map(function ($categoriaGroup) {
-                        // Verificar si la categoría existe antes de acceder a sus propiedades
                         $categoria = $categoriaGroup->first()->categoria;
                         $categoriaNombre = $categoria ? $categoria->nombre : 'Sin categoría';
                         $categoriaId = $categoria ? $categoria->id : null;
@@ -348,11 +279,9 @@ class IngresosPorNegocioController extends Controller
                 ];
             });
 
-        // Calcular totales globales
         $totalGlobal = $query->sum('importe_total');
         $cantidadGlobal = $query->count();
 
-        // Obtener todos los negocios para mostrar incluso los que no tienen ingresos
         $todosNegocios = Business::all()
             ->map(function ($negocio) use ($ingresos) {
                 $negocioIngresos = $ingresos->firstWhere('negocio_id', $negocio->id);
@@ -386,15 +315,8 @@ class IngresosPorNegocioController extends Controller
         ];
     }
 
-    /**
-     * Exportar ingresos por negocio a Excel
-     *
-     * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\BinaryFileResponse|\Illuminate\Http\JsonResponse
-     */
     public function exportIncomesByBusinessToExcel(Request $request)
     {
-        // Verificar que el usuario esté autenticado
         if (!Auth::check()) {
             return response()->json([
                 'status' => 'error',
@@ -402,10 +324,8 @@ class IngresosPorNegocioController extends Controller
             ], 401);
         }
 
-        // Validar parámetros
         $validator = Validator::make($request->all(), [
             'negocio_id' => 'nullable|exists:businesses,id',
-            'vehiculo_id' => 'nullable|exists:vehicles,id',
             'vehicle_id' => 'nullable|exists:vehicles,id',
             'fecha_inicial' => 'required|date',
             'fecha_final' => 'required|date|after_or_equal:fecha_inicial',
@@ -420,10 +340,8 @@ class IngresosPorNegocioController extends Controller
         }
 
         try {
-            // Crear el exportador con los datos
             $export = new IncomesByBusinessExport($request);
 
-            // Generar nombre del archivo
             $negocioNombre = 'Todos_Negocios';
             if ($request->negocio_id) {
                 $negocio = Business::find($request->negocio_id);
@@ -432,13 +350,11 @@ class IngresosPorNegocioController extends Controller
                 }
             }
 
-            $vehiculoId = $request->vehiculo_id ?? $request->vehicle_id;
             $vehiculoInfo = '';
-            if ($vehiculoId) {
-                $vehiculo = Vehicle::find($vehiculoId);
+            if ($request->vehicle_id) {
+                $vehiculo = Vehicle::find($request->vehicle_id);
                 if ($vehiculo) {
-                    $placa = $vehiculo->placa ?? $vehiculo->numero_placa;
-                    $vehiculoInfo = '_Vehiculo_' . str_replace(' ', '_', $placa);
+                    $vehiculoInfo = '_Vehiculo_' . str_replace(' ', '_', $vehiculo->numero_placa);
                 }
             }
 
@@ -447,7 +363,6 @@ class IngresosPorNegocioController extends Controller
                 $request->fecha_final . '_' .
                 date('Y-m-d_H-i-s') . '.xlsx';
 
-            // Retornar el Excel para descarga
             return Excel::download($export, $nombreArchivo);
         } catch (\Exception $e) {
             return response()->json([
@@ -458,15 +373,8 @@ class IngresosPorNegocioController extends Controller
         }
     }
 
-    /**
-     * Exportar ingresos por negocio a PDF
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\Response|\Illuminate\Http\JsonResponse
-     */
     public function exportIncomesByBusinessToPDF(Request $request)
     {
-        // Verificar que el usuario esté autenticado
         if (!Auth::check()) {
             return response()->json([
                 'status' => 'error',
@@ -474,10 +382,8 @@ class IngresosPorNegocioController extends Controller
             ], 401);
         }
 
-        // Validar parámetros
         $validator = Validator::make($request->all(), [
             'negocio_id' => 'nullable|exists:businesses,id',
-            'vehiculo_id' => 'nullable|exists:vehicles,id',
             'vehicle_id' => 'nullable|exists:vehicles,id',
             'fecha_inicial' => 'required|date',
             'fecha_final' => 'required|date|after_or_equal:fecha_inicial',
@@ -492,10 +398,8 @@ class IngresosPorNegocioController extends Controller
         }
 
         try {
-            // Obtener datos procesados reutilizando el método auxiliar
             $data = $this->getProcessedIncomesByBusiness($request);
 
-            // Formatear datos para el PDF (conversiones explícitas)
             $data['negocios'] = $data['negocios']->map(function ($negocio) {
                 return [
                     'negocio_id' => $negocio['negocio_id'],
@@ -515,14 +419,9 @@ class IngresosPorNegocioController extends Controller
                 ];
             })->all();
 
-            // Agregar estadísticas adicionales
             $data['estadisticas_adicionales'] = [
-                'negocio_mayor_ingreso' => $data['ingresos']->sortByDesc(function ($negocio) {
-                    return $negocio['total_ingresos'];
-                })->first(),
-                'negocio_menor_ingreso' => $data['ingresos']->sortBy(function ($negocio) {
-                    return $negocio['total_ingresos'];
-                })->first(),
+                'negocio_mayor_ingreso' => $data['ingresos']->sortByDesc('total_ingresos')->first(),
+                'negocio_menor_ingreso' => $data['ingresos']->sortBy('total_ingresos')->first(),
                 'distribucion_porcentual' => collect($data['distribucion_porcentual'])->map(function ($item) {
                     return [
                         'negocio_id' => $item['negocio_id'],
@@ -533,11 +432,10 @@ class IngresosPorNegocioController extends Controller
                 })->all()
             ];
 
-            // Agregar información del vehículo si existe
             if ($data['vehiculo']) {
                 $data['vehiculo_info'] = [
                     'id' => $data['vehiculo']->id,
-                    'placa' => $data['vehiculo']->placa ?? $data['vehiculo']->numero_placa,
+                    'placa' => $data['vehiculo']->numero_placa,
                     'marca' => $data['vehiculo']->marca,
                     'modelo' => $data['vehiculo']->modelo,
                     'negocio' => $data['vehiculo']->negocio ? [
@@ -547,11 +445,9 @@ class IngresosPorNegocioController extends Controller
                 ];
             }
 
-            // Generar el PDF
             $pdf = Pdf::loadView('exports.incomes_by_business_pdf', $data)
                 ->setPaper('a4', 'portrait');
 
-            // Generar nombre del archivo
             $negocioNombre = 'Todos_Negocios';
             if ($request->negocio_id) {
                 $negocio = Business::find($request->negocio_id);
@@ -560,13 +456,11 @@ class IngresosPorNegocioController extends Controller
                 }
             }
 
-            $vehiculoId = $request->vehiculo_id ?? $request->vehicle_id;
             $vehiculoInfo = '';
-            if ($vehiculoId) {
-                $vehiculo = Vehicle::find($vehiculoId);
+            if ($request->vehicle_id) {
+                $vehiculo = Vehicle::find($request->vehicle_id);
                 if ($vehiculo) {
-                    $placa = $vehiculo->placa ?? $vehiculo->numero_placa;
-                    $vehiculoInfo = '_Vehiculo_' . str_replace(' ', '_', $placa);
+                    $vehiculoInfo = '_Vehiculo_' . str_replace(' ', '_', $vehiculo->numero_placa);
                 }
             }
 
@@ -575,7 +469,6 @@ class IngresosPorNegocioController extends Controller
                 $request->fecha_final . '_' .
                 date('Y-m-d_H-i-s') . '.pdf';
 
-            // Retornar el PDF para descarga
             return $pdf->download($nombreArchivo);
         } catch (\Exception $e) {
             return response()->json([
