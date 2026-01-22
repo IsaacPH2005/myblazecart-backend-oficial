@@ -271,8 +271,15 @@ Route::middleware('auth:sanctum')->group(function () {
             // Obtener vehículos por negocio
             Route::get('/vehicles-by-business', [IngresosPorNegocioController::class, 'getVehiclesByBusiness']);
 
-            //Obtener negocio con mayor egreso en un período
+            // Negocio con Mayor Egreso
             Route::get('/business-highest-expense', [NegocioConMayorEgresosController::class, 'getBusinessWithHighestExpense']);
+            Route::get('/vehicles-by-business-expense', [NegocioConMayorEgresosController::class, 'getVehiclesByBusiness']);
+
+
+
+
+
+
             //Obtener estado financiero de vehículos de un negocio
             Route::get('/vehicles-financial-statement', [VehiculosDelNegocioController::class, 'getVehiclesFinancialStatementByBusiness']);
             Route::get('/vehicle-financial-statement', [VehiculosDelNegocioController::class, 'getVehicleFinancialStatement']);
