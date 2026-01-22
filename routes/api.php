@@ -263,10 +263,13 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/export-incomes-excel', [EgresosPorCategoriaController::class, 'exportIncomesToExcel']);
 
 
-            // Obtener ingresos por categoría filtrados por negocio y rango de fechas
-            Route::get('/incomes-by-category', [IngresosPorNegocioController::class, 'getIncomesByBusiness']);
-            Route::get('/export-incomes-excel', [IngresosPorNegocioController::class, 'exportIncomesByBusinessToExcel']);
-            Route::get('/export-incomes-by-category-pdf', [IngresosPorNegocioController::class, 'exportIncomesByBusinessToPDF']);
+            // Ingresos por Negocio
+            Route::get('/incomes-by-business', [IngresosPorNegocioController::class, 'getIncomesByBusiness']);
+            Route::get('/export-incomes-by-business-excel', [IngresosPorNegocioController::class, 'exportIncomesByBusinessToExcel']);
+            Route::get('/export-incomes-by-business-pdf', [IngresosPorNegocioController::class, 'exportIncomesByBusinessToPDF']);
+
+            // Obtener vehículos por negocio
+            Route::get('/vehicles-by-business', [IngresosPorNegocioController::class, 'getVehiclesByBusiness']);
 
             //Obtener negocio con mayor egreso en un período
             Route::get('/business-highest-expense', [NegocioConMayorEgresosController::class, 'getBusinessWithHighestExpense']);
