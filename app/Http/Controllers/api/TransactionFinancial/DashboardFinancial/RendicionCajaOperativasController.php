@@ -35,31 +35,68 @@ class RendicionCajaOperativasController extends Controller
                 Log::info("🔄 Procesando caja: {$caja->nombre} (ID: {$caja->id})");
 
                 // ==============================================================
-                // CALCULAR INGRESOS DESDE TODAS LAS FUENTES
+                // CALCULAR SALDO INICIAL (antes del período)
                 // ==============================================================
 
-                // 1. Ingresos desde FinancialTransactions (transacciones directas a la caja)
+                // Ingresos antes del período desde FinancialTransactions
+                $ingresosAntesFinancial = FinancialTransactions::where('caja_operativa_id', $caja->id)
+                    ->where('tipo_de_transaccion', 'Ingreso')
+                    ->where('fecha', '<', $fechaInicio)
+                    ->sum('importe_total');
+
+                // Ingresos antes del período desde OperatingBoxHistorie
+                $ingresosAntesHistorial = OperatingBoxHistorie::where('operating_box_id', $caja->id)
+                    ->where('tipo_movimiento', 'ingreso')
+                    ->where('created_at', '<', $fechaInicio . ' 00:00:00')
+                    ->sum('monto');
+
+                // Egresos antes del período desde FinancialTransactions
+                $egresosAntesFinancial = FinancialTransactions::where('caja_operativa_id', $caja->id)
+                    ->where('tipo_de_transaccion', 'Egreso')
+                    ->where('fecha', '<', $fechaInicio)
+                    ->sum('importe_total');
+
+                // Egresos antes del período desde OperatingBoxHistorie
+                $egresosAntesHistorial = OperatingBoxHistorie::where('operating_box_id', $caja->id)
+                    ->where('tipo_movimiento', 'egreso')
+                    ->where('created_at', '<', $fechaInicio . ' 00:00:00')
+                    ->sum('monto');
+
+                $saldoInicial = ($ingresosAntesFinancial + $ingresosAntesHistorial) -
+                    (abs($egresosAntesFinancial) + abs($egresosAntesHistorial));
+
+                Log::info("💰 Saldo inicial de caja {$caja->nombre}", [
+                    'ingresosAntesFinancial' => $ingresosAntesFinancial,
+                    'ingresosAntesHistorial' => $ingresosAntesHistorial,
+                    'egresosAntesFinancial' => $egresosAntesFinancial,
+                    'egresosAntesHistorial' => $egresosAntesHistorial,
+                    'saldoInicial' => $saldoInicial
+                ]);
+
+                // ==============================================================
+                // CALCULAR INGRESOS DEL PERÍODO
+                // ==============================================================
+
                 $ingresosFinancialTransactions = FinancialTransactions::where('caja_operativa_id', $caja->id)
                     ->where('tipo_de_transaccion', 'Ingreso')
                     ->whereBetween('fecha', [$fechaInicio, $fechaFin])
                     ->sum('importe_total');
 
-                // 2. Ingresos desde OperatingBoxHistorie (historial de movimientos de la caja)
                 $ingresosHistorial = OperatingBoxHistorie::where('operating_box_id', $caja->id)
                     ->where('tipo_movimiento', 'ingreso')
                     ->whereBetween('created_at', [$fechaInicio . ' 00:00:00', $fechaFin . ' 23:59:59'])
                     ->sum('monto');
 
-                $totalIngresos = $ingresosFinancialTransactions + $ingresosHistorial;
+                $totalIngresosPeriodo = $ingresosFinancialTransactions + $ingresosHistorial;
 
-                Log::info("📊 Ingresos de caja {$caja->nombre}", [
+                Log::info("📊 Ingresos del período de caja {$caja->nombre}", [
                     'ingresosFinancialTransactions' => $ingresosFinancialTransactions,
                     'ingresosHistorial' => $ingresosHistorial,
-                    'totalIngresos' => $totalIngresos
+                    'totalIngresosPeriodo' => $totalIngresosPeriodo
                 ]);
 
                 // ==============================================================
-                // CALCULAR EGRESOS
+                // CALCULAR EGRESOS DEL PERÍODO
                 // ==============================================================
 
                 $egresosFinancialTransactions = FinancialTransactions::where('caja_operativa_id', $caja->id)
@@ -72,18 +109,26 @@ class RendicionCajaOperativasController extends Controller
                     ->whereBetween('created_at', [$fechaInicio . ' 00:00:00', $fechaFin . ' 23:59:59'])
                     ->sum('monto');
 
-                $totalEgresos = abs($egresosFinancialTransactions) + abs($egresosHistorial);
+                $totalEgresosPeriodo = abs($egresosFinancialTransactions) + abs($egresosHistorial);
 
-                Log::info("📊 Egresos de caja {$caja->nombre}", [
+                Log::info("📊 Egresos del período de caja {$caja->nombre}", [
                     'egresosFinancialTransactions' => $egresosFinancialTransactions,
                     'egresosHistorial' => $egresosHistorial,
-                    'totalEgresos' => $totalEgresos
+                    'totalEgresosPeriodo' => $totalEgresosPeriodo
                 ]);
 
                 // ==============================================================
                 // CALCULAR SALDO FINAL
                 // ==============================================================
-                $saldoFinal = $totalIngresos - $totalEgresos;
+                $saldoFinal = $saldoInicial + $totalIngresosPeriodo - $totalEgresosPeriodo;
+
+                Log::info("💵 Resumen de caja {$caja->nombre}", [
+                    'saldoInicial' => $saldoInicial,
+                    'totalIngresosPeriodo' => $totalIngresosPeriodo,
+                    'totalEgresosPeriodo' => $totalEgresosPeriodo,
+                    'saldoFinal' => $saldoFinal,
+                    'saldoActualDB' => $caja->saldo
+                ]);
 
                 // ==============================================================
                 // OBTENER DETALLE DE INGRESOS
@@ -196,10 +241,12 @@ class RendicionCajaOperativasController extends Controller
                         'fecha_fin' => $fechaFin,
                     ],
                     'resumen' => [
-                        'total_ingresos' => floatval($totalIngresos),
-                        'total_ingresos_formatted' => number_format($totalIngresos, 2, '.', ','),
-                        'total_egresos' => floatval($totalEgresos),
-                        'total_egresos_formatted' => number_format($totalEgresos, 2, '.', ','),
+                        'saldo_inicial' => floatval($saldoInicial),
+                        'saldo_inicial_formatted' => number_format($saldoInicial, 2, '.', ','),
+                        'total_ingresos' => floatval($totalIngresosPeriodo),
+                        'total_ingresos_formatted' => number_format($totalIngresosPeriodo, 2, '.', ','),
+                        'total_egresos' => floatval($totalEgresosPeriodo),
+                        'total_egresos_formatted' => number_format($totalEgresosPeriodo, 2, '.', ','),
                         'saldo_final' => floatval($saldoFinal),
                         'saldo_final_formatted' => number_format($saldoFinal, 2, '.', ','),
                         'cantidad_ingresos' => $detalleIngresos->count(),
@@ -320,10 +367,34 @@ class RendicionCajaOperativasController extends Controller
     private function obtenerDatosParaExportar($fechaInicio, $fechaFin)
     {
         $cajas = OperatingBox::where('estado', true)->get();
-
         $resultados = [];
 
         foreach ($cajas as $caja) {
+            // Saldo inicial
+            $ingresosAntesFinancial = FinancialTransactions::where('caja_operativa_id', $caja->id)
+                ->where('tipo_de_transaccion', 'Ingreso')
+                ->where('fecha', '<', $fechaInicio)
+                ->sum('importe_total');
+
+            $ingresosAntesHistorial = OperatingBoxHistorie::where('operating_box_id', $caja->id)
+                ->where('tipo_movimiento', 'ingreso')
+                ->where('created_at', '<', $fechaInicio . ' 00:00:00')
+                ->sum('monto');
+
+            $egresosAntesFinancial = FinancialTransactions::where('caja_operativa_id', $caja->id)
+                ->where('tipo_de_transaccion', 'Egreso')
+                ->where('fecha', '<', $fechaInicio)
+                ->sum('importe_total');
+
+            $egresosAntesHistorial = OperatingBoxHistorie::where('operating_box_id', $caja->id)
+                ->where('tipo_movimiento', 'egreso')
+                ->where('created_at', '<', $fechaInicio . ' 00:00:00')
+                ->sum('monto');
+
+            $saldoInicial = ($ingresosAntesFinancial + $ingresosAntesHistorial) -
+                (abs($egresosAntesFinancial) + abs($egresosAntesHistorial));
+
+            // Ingresos y egresos del período
             $ingresosFinancialTransactions = FinancialTransactions::where('caja_operativa_id', $caja->id)
                 ->where('tipo_de_transaccion', 'Ingreso')
                 ->whereBetween('fecha', [$fechaInicio, $fechaFin])
@@ -348,7 +419,7 @@ class RendicionCajaOperativasController extends Controller
 
             $totalEgresos = abs($egresosFinancialTransactions) + abs($egresosHistorial);
 
-            $saldoFinal = $totalIngresos - $totalEgresos;
+            $saldoFinal = $saldoInicial + $totalIngresos - $totalEgresos;
 
             $ingresos = FinancialTransactions::where('caja_operativa_id', $caja->id)
                 ->where('tipo_de_transaccion', 'Ingreso')
@@ -399,6 +470,7 @@ class RendicionCajaOperativasController extends Controller
                     'fecha_fin' => $fechaFin,
                 ],
                 'resumen' => [
+                    'saldo_inicial' => $saldoInicial,
                     'total_ingresos' => $totalIngresos,
                     'total_egresos' => $totalEgresos,
                     'saldo_final' => $saldoFinal,
