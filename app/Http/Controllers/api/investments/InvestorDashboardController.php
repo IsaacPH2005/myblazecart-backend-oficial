@@ -21,7 +21,6 @@ class InvestorDashboardController extends Controller
         try {
             $user = Auth::user();
 
-            // Verificar que el usuario tenga rol de inversionista
             if (!$user->hasRole('inversionista')) {
                 return response()->json([
                     'success' => false,
@@ -29,7 +28,6 @@ class InvestorDashboardController extends Controller
                 ], 403);
             }
 
-            // Obtener SOLO las inversiones del inversionista autenticado
             $investments = Investment::with(['vehicle', 'business'])
                 ->where('user_id', $user->id)
                 ->orderBy('created_at', 'desc')
@@ -67,19 +65,16 @@ class InvestorDashboardController extends Controller
                 ]);
             }
 
-            // Calcular estadísticas básicas
             $totalInversiones = $investments->count();
             $capitalTotal = $investments->sum('monto_inversion');
             $inversionesActivas = $investments->where('active', true)->count();
 
-            // Obtener SOLO los negocios y vehículos donde el usuario ha invertido
             $negociosIds = $investments->whereNotNull('business_id')->pluck('business_id')->unique();
             $vehiculosIds = $investments->whereNotNull('vehicle_id')->pluck('vehicle_id')->unique();
 
             $negociosUnicos = $negociosIds->count();
             $vehiculosUnicos = $vehiculosIds->count();
 
-            // Inversiones por estado
             $inversionesPorEstado = [
                 'pendiente' => $investments->where('estado', 'pendiente')->count(),
                 'activo' => $investments->where('estado', 'activo')->count(),
@@ -87,19 +82,16 @@ class InvestorDashboardController extends Controller
                 'cancelado' => $investments->where('estado', 'cancelado')->count(),
             ];
 
-            // Calcular rendimiento SOLO de SUS negocios y vehículos
             $rendimientoNegocios = 0;
             $gastosNegocios = 0;
 
             if ($negociosIds->isNotEmpty()) {
-                // Ingresos SIN caja operativa (regla de negocio)
                 $rendimientoNegocios = FinancialTransactions::whereIn('negocio_id', $negociosIds)
                     ->where('tipo_de_transaccion', 'Ingreso')
                     ->whereNull('caja_operativa_id')
                     ->where('estado', true)
                     ->sum('importe_total');
 
-                // Egresos TODOS (incluye caja operativa - gastos reales)
                 $gastosNegocios = FinancialTransactions::whereIn('negocio_id', $negociosIds)
                     ->where('tipo_de_transaccion', 'Egreso')
                     ->where('estado', true)
@@ -125,10 +117,8 @@ class InvestorDashboardController extends Controller
             $gastosTotal = $gastosNegocios + $gastosVehiculos;
             $utilidadNeta = $rendimientoTotal - $gastosTotal;
 
-            // ROI calculado
             $roi = $capitalTotal > 0 ? ($utilidadNeta / $capitalTotal) * 100 : 0;
 
-            // Actividad reciente (últimas 5 transacciones de sus inversiones)
             $actividadReciente = [];
 
             if ($negociosIds->isNotEmpty() || $vehiculosIds->isNotEmpty()) {
@@ -150,7 +140,7 @@ class InvestorDashboardController extends Controller
                     return [
                         'id' => $tx->id,
                         'tipo' => ucfirst($tx->tipo_de_transaccion),
-                        'nombre' => $tx->negocio?->nombre ?? $tx->vehicle?->placa ?? 'N/A',
+                        'nombre' => $tx->negocio?->nombre ?? $tx->vehicle?->numero_placa ?? 'N/A',
                         'categoria' => $tx->categoria?->nombre ?? 'Sin categoría',
                         'monto' => $tx->importe_total,
                         'fecha' => Carbon::parse($tx->fecha)->diffForHumans(),
@@ -208,25 +198,21 @@ class InvestorDashboardController extends Controller
                 ], 403);
             }
 
-            // SOLO inversiones del usuario autenticado
             $investments = Investment::with(['vehicle', 'business'])
                 ->where('user_id', $user->id)
                 ->orderBy('created_at', 'desc')
                 ->get()
                 ->map(function ($investment) {
-                    // Calcular rendimiento individual POR INVERSIÓN
                     $rendimiento = 0;
                     $gastos = 0;
 
                     if ($investment->business_id) {
-                        // Ingresos SIN caja operativa
                         $rendimiento = FinancialTransactions::where('negocio_id', $investment->business_id)
                             ->where('tipo_de_transaccion', 'Ingreso')
                             ->whereNull('caja_operativa_id')
                             ->where('estado', true)
                             ->sum('importe_total');
 
-                        // Egresos TODOS
                         $gastos = FinancialTransactions::where('negocio_id', $investment->business_id)
                             ->where('tipo_de_transaccion', 'Egreso')
                             ->where('estado', true)
@@ -259,7 +245,7 @@ class InvestorDashboardController extends Controller
                         ] : null,
                         'vehicle' => $investment->vehicle ? [
                             'id' => $investment->vehicle->id,
-                            'placa' => $investment->vehicle->placa,
+                            'numero_placa' => $investment->vehicle->numero_placa,
                             'marca' => $investment->vehicle->marca,
                             'modelo' => $investment->vehicle->modelo,
                             'codigo_unico' => $investment->vehicle->codigo_unico,
@@ -316,7 +302,6 @@ class InvestorDashboardController extends Controller
                 ], 403);
             }
 
-            // Verificar que el usuario tenga una inversión en este negocio
             $investment = Investment::where('user_id', $user->id)
                 ->where('business_id', $businessId)
                 ->first();
@@ -333,7 +318,6 @@ class InvestorDashboardController extends Controller
 
             $business = Business::findOrFail($businessId);
 
-            // INGRESOS SIN CAJA OPERATIVA (regla de negocio)
             $totalIngresos = FinancialTransactions::where('negocio_id', $businessId)
                 ->where('tipo_de_transaccion', 'Ingreso')
                 ->whereNull('caja_operativa_id')
@@ -341,7 +325,6 @@ class InvestorDashboardController extends Controller
                 ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
                 ->sum('importe_total');
 
-            // EGRESOS TODOS (incluye caja operativa)
             $totalEgresos = FinancialTransactions::where('negocio_id', $businessId)
                 ->where('tipo_de_transaccion', 'Egreso')
                 ->where('estado', true)
@@ -351,7 +334,6 @@ class InvestorDashboardController extends Controller
             $margenBruto = $totalIngresos - $totalEgresos;
             $rentabilidad = $totalIngresos > 0 ? ($margenBruto / $totalIngresos) * 100 : 0;
 
-            // Transacciones por estado
             $transaccionesPorEstado = FinancialTransactions::where('negocio_id', $businessId)
                 ->where(function ($query) {
                     $query->where('tipo_de_transaccion', 'Egreso')
@@ -445,7 +427,6 @@ class InvestorDashboardController extends Controller
                 ], 403);
             }
 
-            // Verificar que el usuario tenga una inversión en este negocio
             $investment = Investment::where('user_id', $user->id)
                 ->where('business_id', $businessId)
                 ->first();
@@ -461,7 +442,6 @@ class InvestorDashboardController extends Controller
                 ->where('negocio_id', $businessId)
                 ->where('estado', true);
 
-            // Aplicar regla de negocio: Solo ingresos sin caja operativa
             $query->where(function ($q) {
                 $q->where('tipo_de_transaccion', 'Egreso')
                     ->orWhere(function ($subQ) {
@@ -470,7 +450,6 @@ class InvestorDashboardController extends Controller
                     });
             });
 
-            // Filtros opcionales
             if ($request->has('tipo')) {
                 $query->where('tipo_de_transaccion', $request->tipo);
             }
@@ -496,7 +475,7 @@ class InvestorDashboardController extends Controller
     }
 
     /**
-     * Obtener lista de negocios donde el inversionista tiene inversiones
+     * ✨ NUEVO: Obtener lista de negocios con sus vehículos donde el inversionista ha invertido
      */
     public function myBusinesses()
     {
@@ -510,46 +489,130 @@ class InvestorDashboardController extends Controller
                 ], 403);
             }
 
-            $investments = Investment::with('business')
+            // Obtener todas las inversiones del usuario (negocios + vehículos)
+            $investments = Investment::with(['business', 'vehicle'])
                 ->where('user_id', $user->id)
-                ->whereNotNull('business_id')
                 ->get();
 
-            $negocios = $investments->map(function ($investment) {
-                if (!$investment->business) return null;
+            // Agrupar por negocio
+            $negociosAgrupados = [];
 
-                // Calcular rendimiento del negocio
-                $ingresos = FinancialTransactions::where('negocio_id', $investment->business_id)
+            // 1. Procesar inversiones directas en negocios
+            $inversionesNegocios = $investments->where('business_id', '!=', null);
+
+            foreach ($inversionesNegocios as $investment) {
+                $businessId = $investment->business_id;
+
+                if (!isset($negociosAgrupados[$businessId])) {
+                    $negociosAgrupados[$businessId] = [
+                        'negocio' => [
+                            'id' => $investment->business->id,
+                            'nombre' => $investment->business->nombre,
+                            'descripcion' => $investment->business->descripcion,
+                        ],
+                        'total_invertido_negocio' => 0,
+                        'vehiculos' => [],
+                        'rendimiento_total' => [
+                            'ingresos' => 0,
+                            'egresos' => 0,
+                            'utilidad' => 0,
+                        ],
+                    ];
+                }
+
+                // Si la inversión es directa al negocio (sin vehículo específico)
+                if (!$investment->vehicle_id) {
+                    $negociosAgrupados[$businessId]['total_invertido_negocio'] += floatval($investment->monto_inversion);
+                }
+            }
+
+            // 2. Procesar inversiones en vehículos (que pertenecen a negocios)
+            $inversionesVehiculos = $investments->where('vehicle_id', '!=', null)->where('business_id', '!=', null);
+
+            foreach ($inversionesVehiculos as $investment) {
+                $businessId = $investment->business_id;
+                $vehicleId = $investment->vehicle_id;
+
+                // Inicializar negocio si no existe
+                if (!isset($negociosAgrupados[$businessId])) {
+                    $negociosAgrupados[$businessId] = [
+                        'negocio' => [
+                            'id' => $investment->business->id,
+                            'nombre' => $investment->business->nombre,
+                            'descripcion' => $investment->business->descripcion,
+                        ],
+                        'total_invertido_negocio' => 0,
+                        'vehiculos' => [],
+                        'rendimiento_total' => [
+                            'ingresos' => 0,
+                            'egresos' => 0,
+                            'utilidad' => 0,
+                        ],
+                    ];
+                }
+
+                // Calcular rendimiento del vehículo
+                $ingresosVehiculo = FinancialTransactions::where('vehicle_id', $vehicleId)
+                    ->where('tipo_de_transaccion', 'Ingreso')
+                    ->where('estado', true)
+                    ->sum('importe_total');
+
+                $egresosVehiculo = FinancialTransactions::where('vehicle_id', $vehicleId)
+                    ->where('tipo_de_transaccion', 'Egreso')
+                    ->where('estado', true)
+                    ->sum('importe_total');
+
+                $utilidadVehiculo = $ingresosVehiculo - $egresosVehiculo;
+
+                // Agregar vehículo al negocio
+                $negociosAgrupados[$businessId]['vehiculos'][] = [
+                    'inversion_id' => $investment->id,
+                    'vehiculo' => [
+                        'id' => $investment->vehicle->id,
+                        'codigo_unico' => $investment->vehicle->codigo_unico,
+                        'numero_placa' => $investment->vehicle->numero_placa,
+                        'marca' => $investment->vehicle->marca,
+                        'modelo' => $investment->vehicle->modelo,
+                    ],
+                    'mi_inversion' => round($investment->monto_inversion, 2),
+                    'estado_inversion' => $investment->estado,
+                    'rendimiento' => [
+                        'ingresos' => round($ingresosVehiculo, 2),
+                        'egresos' => round($egresosVehiculo, 2),
+                        'utilidad' => round($utilidadVehiculo, 2),
+                    ],
+                ];
+
+                // Sumar al total del negocio
+                $negociosAgrupados[$businessId]['total_invertido_negocio'] += floatval($investment->monto_inversion);
+            }
+
+            // 3. Calcular rendimiento total del negocio (incluyendo todos sus vehículos)
+            foreach ($negociosAgrupados as $businessId => &$negocioData) {
+                $ingresosNegocio = FinancialTransactions::where('negocio_id', $businessId)
                     ->where('tipo_de_transaccion', 'Ingreso')
                     ->whereNull('caja_operativa_id')
                     ->where('estado', true)
                     ->sum('importe_total');
 
-                $egresos = FinancialTransactions::where('negocio_id', $investment->business_id)
+                $egresosNegocio = FinancialTransactions::where('negocio_id', $businessId)
                     ->where('tipo_de_transaccion', 'Egreso')
                     ->where('estado', true)
                     ->sum('importe_total');
 
-                return [
-                    'inversion_id' => $investment->id,
-                    'negocio' => [
-                        'id' => $investment->business->id,
-                        'nombre' => $investment->business->nombre,
-                        'descripcion' => $investment->business->descripcion,
-                    ],
-                    'mi_inversion' => round($investment->monto_inversion, 2),
-                    'estado_inversion' => $investment->estado,
-                    'rendimiento' => [
-                        'ingresos' => round($ingresos, 2),
-                        'egresos' => round($egresos, 2),
-                        'utilidad' => round($ingresos - $egresos, 2),
-                    ],
+                $negocioData['rendimiento_total'] = [
+                    'ingresos' => round($ingresosNegocio, 2),
+                    'egresos' => round($egresosNegocio, 2),
+                    'utilidad' => round($ingresosNegocio - $egresosNegocio, 2),
                 ];
-            })->filter()->values();
+
+                $negocioData['total_invertido_negocio'] = round($negocioData['total_invertido_negocio'], 2);
+                $negocioData['cantidad_vehiculos'] = count($negocioData['vehiculos']);
+            }
 
             return response()->json([
                 'success' => true,
-                'data' => $negocios,
+                'data' => array_values($negociosAgrupados),
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -562,6 +625,7 @@ class InvestorDashboardController extends Controller
 
     /**
      * Obtener detalles completos de un negocio donde el inversionista ha invertido
+     * Incluye todos los vehículos del negocio donde tiene inversiones
      */
     public function businessDetails($businessId)
     {
@@ -575,40 +639,115 @@ class InvestorDashboardController extends Controller
                 ], 403);
             }
 
-            // Verificar que el usuario tenga una inversión en este negocio
-            $investment = Investment::with('business')
+            // Verificar que el usuario tenga alguna inversión en este negocio
+            $investments = Investment::with(['business', 'vehicle'])
                 ->where('user_id', $user->id)
                 ->where('business_id', $businessId)
-                ->first();
+                ->get();
 
-            if (!$investment) {
+            if ($investments->isEmpty()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No tienes inversiones en este negocio'
                 ], 404);
             }
 
-            $business = $investment->business;
+            $business = Business::findOrFail($businessId);
 
-            // Calcular rendimiento del negocio
-            $ingresos = FinancialTransactions::where('negocio_id', $businessId)
+            // Calcular rendimiento general del negocio
+            $ingresosNegocio = FinancialTransactions::where('negocio_id', $businessId)
                 ->where('tipo_de_transaccion', 'Ingreso')
                 ->whereNull('caja_operativa_id')
                 ->where('estado', true)
                 ->sum('importe_total');
 
-            $egresos = FinancialTransactions::where('negocio_id', $businessId)
+            $egresosNegocio = FinancialTransactions::where('negocio_id', $businessId)
                 ->where('tipo_de_transaccion', 'Egreso')
                 ->where('estado', true)
                 ->sum('importe_total');
 
-            $utilidad = $ingresos - $egresos;
-            $roi = $investment->monto_inversion > 0
-                ? ($utilidad / $investment->monto_inversion) * 100
-                : 0;
+            $utilidadNegocio = $ingresosNegocio - $egresosNegocio;
 
-            // Obtener últimas transacciones
-            $ultimasTransacciones = FinancialTransactions::with(['categoria', 'metodo'])
+            // Total invertido por el usuario en este negocio
+            $totalInvertido = $investments->sum('monto_inversion');
+            $roi = $totalInvertido > 0 ? ($utilidadNegocio / $totalInvertido) * 100 : 0;
+
+            // Agrupar inversiones
+            $inversionesDirectas = [];
+            $inversionesPorVehiculo = [];
+
+            foreach ($investments as $investment) {
+                if ($investment->vehicle_id) {
+                    // Inversión en vehículo específico
+                    $ingresosVehiculo = FinancialTransactions::where('vehicle_id', $investment->vehicle_id)
+                        ->where('tipo_de_transaccion', 'Ingreso')
+                        ->where('estado', true)
+                        ->sum('importe_total');
+
+                    $egresosVehiculo = FinancialTransactions::where('vehicle_id', $investment->vehicle_id)
+                        ->where('tipo_de_transaccion', 'Egreso')
+                        ->where('estado', true)
+                        ->sum('importe_total');
+
+                    $utilidadVehiculo = $ingresosVehiculo - $egresosVehiculo;
+                    $roiVehiculo = $investment->monto_inversion > 0
+                        ? ($utilidadVehiculo / $investment->monto_inversion) * 100
+                        : 0;
+
+                    // Últimas transacciones del vehículo
+                    $ultimasTransaccionesVehiculo = FinancialTransactions::with(['categoria', 'metodo'])
+                        ->where('vehicle_id', $investment->vehicle_id)
+                        ->where('estado', true)
+                        ->orderBy('fecha', 'desc')
+                        ->limit(5)
+                        ->get()
+                        ->map(function ($tx) {
+                            return [
+                                'id' => $tx->id,
+                                'tipo' => ucfirst($tx->tipo_de_transaccion),
+                                'categoria' => $tx->categoria?->nombre ?? 'Sin categoría',
+                                'metodo' => $tx->metodo?->nombre ?? 'Sin método',
+                                'monto' => $tx->importe_total,
+                                'fecha' => $tx->fecha ? Carbon::parse($tx->fecha)->format('d/m/Y') : 'No especificada',
+                                'descripcion' => $tx->item ?? $tx->observaciones ?? 'Sin descripción',
+                            ];
+                        });
+
+                    $inversionesPorVehiculo[] = [
+                        'inversion_id' => $investment->id,
+                        'vehiculo' => [
+                            'id' => $investment->vehicle->id,
+                            'codigo_unico' => $investment->vehicle->codigo_unico,
+                            'numero_placa' => $investment->vehicle->numero_placa,
+                            'marca' => $investment->vehicle->marca,
+                            'modelo' => $investment->vehicle->modelo,
+                        ],
+                        'monto_invertido' => round($investment->monto_inversion, 2),
+                        'estado' => $investment->estado,
+                        'fecha_inversion' => $investment->created_at ? $investment->created_at->format('d/m/Y') : 'No especificada',
+                        'descripcion' => $investment->descripcion ?? 'Sin descripción',
+                        'rendimiento' => [
+                            'ingresos' => round($ingresosVehiculo, 2),
+                            'egresos' => round($egresosVehiculo, 2),
+                            'utilidad' => round($utilidadVehiculo, 2),
+                            'roi_porcentaje' => round($roiVehiculo, 2),
+                        ],
+                        'ultimas_transacciones' => $ultimasTransaccionesVehiculo,
+                    ];
+                } else {
+                    // Inversión directa en el negocio
+                    $inversionesDirectas[] = [
+                        'id' => $investment->id,
+                        'monto' => round($investment->monto_inversion, 2),
+                        'estado' => $investment->estado,
+                        'fecha_inversion' => $investment->created_at ? $investment->created_at->format('d/m/Y') : 'No especificada',
+                        'descripcion' => $investment->descripcion ?? 'Sin descripción',
+                    ];
+                }
+            }
+
+            // Últimas transacciones generales del negocio
+            $ultimasTransaccionesNegocio = FinancialTransactions::with(['categoria', 'metodo'])
                 ->where('negocio_id', $businessId)
                 ->where('estado', true)
                 ->where(function ($query) {
@@ -644,20 +783,20 @@ class InvestorDashboardController extends Controller
                     'email' => $business->email ?? 'No especificado',
                     'created_at' => $business->created_at ? $business->created_at->format('d/m/Y') : 'No especificada',
                 ],
-                'mi_inversion' => [
-                    'id' => $investment->id,
-                    'monto' => round($investment->monto_inversion, 2),
-                    'estado' => $investment->estado,
-                    'fecha_inversion' => $investment->created_at ? $investment->created_at->format('d/m/Y') : 'No especificada',
-                    'descripcion' => $investment->descripcion ?? 'Sin descripción',
+                'resumen_inversiones' => [
+                    'total_invertido' => round($totalInvertido, 2),
+                    'cantidad_inversiones_directas' => count($inversionesDirectas),
+                    'cantidad_vehiculos_invertidos' => count($inversionesPorVehiculo),
                 ],
-                'rendimiento' => [
-                    'ingresos' => round($ingresos, 2),
-                    'egresos' => round($egresos, 2),
-                    'utilidad' => round($utilidad, 2),
+                'inversiones_directas' => $inversionesDirectas,
+                'inversiones_por_vehiculo' => $inversionesPorVehiculo,
+                'rendimiento_general_negocio' => [
+                    'ingresos' => round($ingresosNegocio, 2),
+                    'egresos' => round($egresosNegocio, 2),
+                    'utilidad' => round($utilidadNegocio, 2),
                     'roi_porcentaje' => round($roi, 2),
                 ],
-                'ultimas_transacciones' => $ultimasTransacciones,
+                'ultimas_transacciones_negocio' => $ultimasTransaccionesNegocio,
             ]);
         } catch (\Exception $e) {
             return response()->json([

@@ -80,7 +80,7 @@ Route::middleware('auth:sanctum')->group(function () {
     |
     */
     Route::middleware(['admin'])->group(function () {
-        Route::prefix('investments')->group(function () {
+        Route::prefix('investments-admin')->group(function () {
             Route::get('/', [InvestmentController::class, 'index']);
             Route::get('/create', [InvestmentController::class, 'create']);
             Route::get('/statistics', [InvestmentController::class, 'statistics']);
@@ -384,12 +384,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Dashboard y datos principales del inversionista
         Route::get('/dashboard', [InvestorDashboardController::class, 'index']);
-        Route::get('/investments', [InvestorDashboardController::class, 'myInvestments']);
-        Route::get('/businesses', [InvestorDashboardController::class, 'myBusinesses']);
-        Route::get('/businesses/{businessId}/details', [InvestorDashboardController::class, 'businessDetails']);
-        Route::get('/businesses/{businessId}/financial-statement', [InvestorDashboardController::class, 'businessFinancialStatement']);
-        Route::get('/businesses/{businessId}/transactions', [InvestorDashboardController::class, 'businessTransactions']);
-
+        Route::get('/my-investments', [InvestorDashboardController::class, 'myInvestments']);
+        Route::get('/my-businesses', [InvestorDashboardController::class, 'myBusinesses']);
+        Route::get('/business/{businessId}/details', [InvestorDashboardController::class, 'businessDetails']);
+        Route::get('/business/{businessId}/financial-statement', [InvestorDashboardController::class, 'businessFinancialStatement']);
+        Route::get('/business/{businessId}/transactions', [InvestorDashboardController::class, 'businessTransactions']);
         // Vehículos financieros para inversionista
         Route::get('/vehicles-financial/business', [VehicleFinancialController::class, 'getVehiclesFinancialStatementByBusiness']);
         Route::get('/vehicles-financial/vehicle', [VehicleFinancialController::class, 'getVehicleFinancialStatement']);

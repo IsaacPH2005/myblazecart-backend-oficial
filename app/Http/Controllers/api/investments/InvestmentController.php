@@ -119,61 +119,12 @@ class InvestmentController extends Controller
     public function index()
     {
         try {
-            Log::info('🔍 Admin - Listando todas las inversiones');
-
-            $investments = Investment::with([
-                'user.generalData',
-                'vehicle',
-                'business'
-            ])
+            $investments = Investment::with(['user.generalData', 'vehicle', 'business'])
                 ->orderBy('created_at', 'desc')
                 ->paginate(15);
 
-            Log::info('📊 Total inversiones:', ['count' => $investments->total()]);
-
-            // Formatear datos
-            $investments->getCollection()->transform(function ($investment) {
-                return [
-                    'id' => $investment->id,
-                    'user_id' => $investment->user_id,
-                    'vehicle_id' => $investment->vehicle_id,
-                    'business_id' => $investment->business_id,
-                    'inversionista' => [
-                        'id' => $investment->user?->id,
-                        'email' => $investment->user?->email ?? 'Sin email',
-                        'nombre_completo' => $investment->user?->generalData
-                            ? trim($investment->user->generalData->nombre . ' ' . $investment->user->generalData->apellido)
-                            : 'Sin nombre',
-                        'documento_identidad' => $investment->user?->generalData?->documento_identidad,
-                        'celular' => $investment->user?->generalData?->celular,
-                        'ciudad' => $investment->user?->generalData?->ciudad,
-                        'departamento' => $investment->user?->generalData?->departamento,
-                    ],
-                    'vehicle' => $investment->vehicle ? [
-                        'id' => $investment->vehicle->id,
-                        'numero_placa' => $investment->vehicle->numero_placa ?? 'N/A',
-                        'marca' => $investment->vehicle->marca ?? 'N/A',
-                        'modelo' => $investment->vehicle->modelo ?? 'N/A',
-                        'año' => $investment->vehicle->año ?? null,
-                        'codigo_unico' => $investment->vehicle->codigo_unico ?? 'N/A',
-                    ] : null,
-                    'business' => $investment->business ? [
-                        'id' => $investment->business->id,
-                        'nombre' => $investment->business->nombre,
-                    ] : null,
-                    'monto_inversion' => floatval($investment->monto_inversion),
-                    'descripcion' => $investment->descripcion ?? '',
-                    'notas' => $investment->notas ?? '',
-                    'active' => (bool)$investment->active,
-                    'estado' => $investment->estado,
-                    'created_at' => $investment->created_at?->format('Y-m-d H:i:s'),
-                    'updated_at' => $investment->updated_at?->format('Y-m-d H:i:s'),
-                ];
-            });
-
             return response()->json([
                 'success' => true,
-                'message' => 'Inversiones obtenidas exitosamente',
                 'data' => $investments->items(),
                 'pagination' => [
                     'current_page' => $investments->currentPage(),
@@ -183,12 +134,6 @@ class InvestmentController extends Controller
                 ]
             ]);
         } catch (\Exception $e) {
-            Log::error('❌ Error en index:', [
-                'error' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine()
-            ]);
-
             return response()->json([
                 'success' => false,
                 'message' => 'Error al obtener inversiones',
@@ -196,6 +141,7 @@ class InvestmentController extends Controller
             ], 500);
         }
     }
+
 
     /**
      * Obtener datos para formulario de creación
