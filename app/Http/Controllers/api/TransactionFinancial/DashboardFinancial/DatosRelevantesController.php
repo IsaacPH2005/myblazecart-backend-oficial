@@ -78,7 +78,7 @@ class DatosRelevantesController extends Controller
             // Query base con filtros opcionales
             $query = FinancialTransactions::query()
                 ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-                ->where('estado', true); // Solo transacciones activas
+                ->where('estado', true);
 
             // Información del negocio y vehículo para contexto
             $negocioInfo = null;
@@ -117,7 +117,6 @@ class DatosRelevantesController extends Controller
                         ] : null
                     ];
 
-                    // Si se filtró por vehículo pero no por negocio, agregar el negocio automáticamente
                     if (!$request->negocio_id && $vehiculo->negocio) {
                         $negocioInfo = [
                             'id' => $vehiculo->negocio->id,
@@ -128,54 +127,59 @@ class DatosRelevantesController extends Controller
                 }
             }
 
-            // Calcular días transcurridos
+            // ✅ Calcular días transcurridos (ENTERO, sin decimales)
             $diasTranscurridos = $fechaInicial->diffInDays($fechaFinal) + 1;
 
-            // ✅ INGRESOS BRUTOS (Total de ingresos SIN excluir caja operativa)
+            // ✅ INGRESOS BRUTOS
             $ingresosBrutos = $query->clone()
                 ->where('tipo_de_transaccion', 'ingreso')
                 ->sum('importe_total');
 
-            // ✅ EGRESOS BRUTOS (Total de egresos)
+            // ✅ EGRESOS BRUTOS
             $egresosBrutos = $query->clone()
                 ->where('tipo_de_transaccion', 'egreso')
                 ->sum('importe_total');
 
-            // ✅ MARGEN BRUTO (Ingresos - Egresos)
+            // ✅ MARGEN BRUTO
             $margenBruto = $ingresosBrutos - $egresosBrutos;
 
-            // ✅ RENTABILIDAD % ((Margen / Ingresos) * 100)
+            // ✅ RENTABILIDAD %
             $rentabilidadPorcentaje = $ingresosBrutos > 0
                 ? round(($margenBruto / $ingresosBrutos) * 100, 2)
                 : 0;
 
-            // Calcular millas recorridas en servicio
+            // ✅ MILLAS RECORRIDAS TOTALES (de TODAS las transacciones)
             $millasRecorridas = $query->clone()
                 ->whereNotNull('millas')
                 ->sum('millas');
 
-            // Calcular productividad por día (basado en ingresos brutos)
+            // ✅ PRODUCTIVIDAD POR DÍA
             $productividadPorDia = $diasTranscurridos > 0
                 ? round($ingresosBrutos / $diasTranscurridos, 2)
                 : 0;
 
-            // Calcular carga mejor pagada (transacción con mayor importe)
+            // Carga mejor pagada
             $cargaMejorPagada = $query->clone()
                 ->where('tipo_de_transaccion', 'ingreso')
-                ->whereNull('caja_operativa_id') // Solo cargas reales (no recargas)
+                ->whereNull('caja_operativa_id')
                 ->orderBy('importe_total', 'desc')
                 ->first();
 
-            // Calcular estimación de pago por milla
+            // ✅ ESTIMACIÓN PAGO POR MILLA
             $estimacionPagoPorMilla = $millasRecorridas > 0
                 ? round($ingresosBrutos / $millasRecorridas, 2)
                 : 0;
 
-            // Contar número total de cargas (ingresos sin caja operativa)
+            // ✅ NÚMERO DE CARGAS
             $numeroCargas = $query->clone()
                 ->where('tipo_de_transaccion', 'ingreso')
                 ->whereNull('caja_operativa_id')
                 ->count();
+
+            // ✅ PROMEDIO POR CARGA
+            $promedioPorCarga = $numeroCargas > 0
+                ? round($ingresosBrutos / $numeroCargas, 2)
+                : 0;
 
             // Preparar datos de respuesta
             $datosOperacion = [
@@ -192,7 +196,7 @@ class DatosRelevantesController extends Controller
                     [
                         'ranking' => 1,
                         'item' => 'DÍAS TRANSCURRIDOS',
-                        'total' => $diasTranscurridos,
+                        'total' => $diasTranscurridos, // ✅ Entero sin decimales
                         'unidad' => 'días',
                         'icono' => '📅'
                     ],
@@ -231,7 +235,7 @@ class DatosRelevantesController extends Controller
                     [
                         'ranking' => 6,
                         'item' => 'MILLAS RECORRIDAS EN SERVICIO',
-                        'total' => number_format($millasRecorridas, 2, '.', ','),
+                        'total' => number_format($millasRecorridas, 0, '.', ','), // ✅ Sin decimales
                         'unidad' => 'millas',
                         'valor_numerico' => $millasRecorridas,
                         'icono' => '🚚'
@@ -247,7 +251,7 @@ class DatosRelevantesController extends Controller
                     [
                         'ranking' => 8,
                         'item' => 'NÚMERO DE CARGAS',
-                        'total' => $numeroCargas,
+                        'total' => $numeroCargas, // ✅ Entero
                         'unidad' => 'cargas',
                         'icono' => '📦'
                     ],
@@ -278,13 +282,9 @@ class DatosRelevantesController extends Controller
                     [
                         'ranking' => 11,
                         'item' => 'PROMEDIO POR CARGA',
-                        'total' => $numeroCargas > 0
-                            ? number_format($ingresosBrutos / $numeroCargas, 2, '.', ',')
-                            : '0.00',
+                        'total' => number_format($promedioPorCarga, 2, '.', ','),
                         'unidad' => '$/carga',
-                        'valor_numerico' => $numeroCargas > 0
-                            ? round($ingresosBrutos / $numeroCargas, 2)
-                            : 0,
+                        'valor_numerico' => $promedioPorCarga,
                         'icono' => '💵'
                     ]
                 ]
@@ -636,6 +636,7 @@ class DatosRelevantesController extends Controller
                     ->where('tipo_de_transaccion', 'egreso')
                     ->sum('importe_total');
 
+                // ✅ MILLAS TOTALES (de todas las transacciones)
                 $millas = $query->clone()
                     ->whereNotNull('millas')
                     ->sum('millas');
@@ -658,7 +659,7 @@ class DatosRelevantesController extends Controller
                         'ingresos' => number_format($ingresos, 2, '.', ','),
                         'egresos' => number_format($egresos, 2, '.', ','),
                         'balance' => number_format($ingresos - $egresos, 2, '.', ','),
-                        'millas' => number_format($millas, 2, '.', ','),
+                        'millas' => number_format($millas, 0, '.', ','), // ✅ Sin decimales
                         'numero_cargas' => $numeroCargas,
                         'promedio_por_carga' => $numeroCargas > 0
                             ? number_format($ingresos / $numeroCargas, 2, '.', ',')
