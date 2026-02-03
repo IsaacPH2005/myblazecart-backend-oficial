@@ -75,10 +75,9 @@ class DatosRelevantesController extends Controller
             $fechaInicial = Carbon::parse($request->fecha_inicial)->startOfDay();
             $fechaFinal = Carbon::parse($request->fecha_final)->endOfDay();
 
-            // Query base con filtros opcionales
+            // ✅ Query base SIN filtro por estado (toma TODAS las transacciones: Pagado, Por Cobrar, Por Pagar)
             $query = FinancialTransactions::query()
-                ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-                ->where('estado', true);
+                ->whereBetween('fecha', [$fechaInicial, $fechaFinal]);
 
             // Información del negocio y vehículo para contexto
             $negocioInfo = null;
@@ -130,12 +129,12 @@ class DatosRelevantesController extends Controller
             // ✅ Calcular días transcurridos (ENTERO, sin decimales)
             $diasTranscurridos = $fechaInicial->diffInDays($fechaFinal) + 1;
 
-            // ✅ INGRESOS BRUTOS
+            // ✅ INGRESOS BRUTOS (TODAS las transacciones de tipo ingreso, sin importar su estado)
             $ingresosBrutos = $query->clone()
                 ->where('tipo_de_transaccion', 'ingreso')
                 ->sum('importe_total');
 
-            // ✅ EGRESOS BRUTOS
+            // ✅ EGRESOS BRUTOS (TODAS las transacciones de tipo egreso, sin importar su estado)
             $egresosBrutos = $query->clone()
                 ->where('tipo_de_transaccion', 'egreso')
                 ->sum('importe_total');
@@ -170,7 +169,7 @@ class DatosRelevantesController extends Controller
                 ? round($ingresosBrutos / $millasRecorridas, 2)
                 : 0;
 
-            // ✅ NÚMERO DE CARGAS
+            // ✅ NÚMERO DE CARGAS (TODAS las cargas, sin importar si están pagadas o por cobrar)
             $numeroCargas = $query->clone()
                 ->where('tipo_de_transaccion', 'ingreso')
                 ->whereNull('caja_operativa_id')
@@ -196,7 +195,7 @@ class DatosRelevantesController extends Controller
                     [
                         'ranking' => 1,
                         'item' => 'DÍAS TRANSCURRIDOS',
-                        'total' => $diasTranscurridos, // ✅ Entero sin decimales
+                        'total' => $diasTranscurridos,
                         'unidad' => 'días',
                         'icono' => '📅'
                     ],
@@ -235,7 +234,7 @@ class DatosRelevantesController extends Controller
                     [
                         'ranking' => 6,
                         'item' => 'MILLAS RECORRIDAS EN SERVICIO',
-                        'total' => number_format($millasRecorridas, 0, '.', ','), // ✅ Sin decimales
+                        'total' => number_format($millasRecorridas, 0, '.', ','),
                         'unidad' => 'millas',
                         'valor_numerico' => $millasRecorridas,
                         'icono' => '🚚'
@@ -251,7 +250,7 @@ class DatosRelevantesController extends Controller
                     [
                         'ranking' => 8,
                         'item' => 'NÚMERO DE CARGAS',
-                        'total' => $numeroCargas, // ✅ Entero
+                        'total' => $numeroCargas,
                         'unidad' => 'cargas',
                         'icono' => '📦'
                     ],
@@ -320,9 +319,9 @@ class DatosRelevantesController extends Controller
             $fechaInicial = Carbon::parse($request->fecha_inicial)->startOfDay();
             $fechaFinal = Carbon::parse($request->fecha_final)->endOfDay();
 
+            // ✅ Query base SIN filtro por estado
             $query = FinancialTransactions::query()
-                ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-                ->where('estado', true);
+                ->whereBetween('fecha', [$fechaInicial, $fechaFinal]);
 
             // Aplicar filtros
             if ($request->negocio_id) {
@@ -505,9 +504,9 @@ class DatosRelevantesController extends Controller
             $fechaInicial = Carbon::parse($request->fecha_inicial);
             $fechaFinal = Carbon::parse($request->fecha_final);
 
+            // ✅ Query base SIN filtro por estado
             $query = FinancialTransactions::query()
                 ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-                ->where('estado', true)
                 ->where('tipo_de_transaccion', 'ingreso');
 
             // Aplicar filtros
@@ -623,9 +622,9 @@ class DatosRelevantesController extends Controller
             $comparativa = [];
 
             foreach ($negocio->vehicles as $vehiculo) {
+                // ✅ Query base SIN filtro por estado
                 $query = FinancialTransactions::query()
                     ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
-                    ->where('estado', true)
                     ->where('vehicle_id', $vehiculo->id);
 
                 $ingresos = $query->clone()
@@ -659,7 +658,7 @@ class DatosRelevantesController extends Controller
                         'ingresos' => number_format($ingresos, 2, '.', ','),
                         'egresos' => number_format($egresos, 2, '.', ','),
                         'balance' => number_format($ingresos - $egresos, 2, '.', ','),
-                        'millas' => number_format($millas, 0, '.', ','), // ✅ Sin decimales
+                        'millas' => number_format($millas, 0, '.', ','),
                         'numero_cargas' => $numeroCargas,
                         'promedio_por_carga' => $numeroCargas > 0
                             ? number_format($ingresos / $numeroCargas, 2, '.', ',')
