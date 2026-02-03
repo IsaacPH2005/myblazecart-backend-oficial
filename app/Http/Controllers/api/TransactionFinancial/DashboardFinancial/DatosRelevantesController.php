@@ -37,25 +37,20 @@ class DatosRelevantesController extends Controller
                     'año' => $vehicle->año,
                     'numero_placa' => $vehicle->numero_placa,
                     'tipo_vehiculo' => $vehicle->tipo_vehiculo,
-                    'nombre_completo' => "{$vehicle->marca} {$vehicle->modelo} ({$vehicle->numero_placa})",
+                    'nombre_display' => "{$vehicle->codigo_unico} - {$vehicle->numero_placa} ({$vehicle->marca} {$vehicle->modelo})",
                 ];
             });
 
             return response()->json([
-                'success' => true,
-                'data' => [
-                    'negocio' => [
-                        'id' => $negocio->id,
-                        'nombre' => $negocio->nombre,
-                        'descripcion' => $negocio->descripcion,
-                    ],
-                    'vehiculos' => $vehiculos,
-                    'total_vehiculos' => $vehiculos->count()
-                ]
+                'status' => 'success',
+                'message' => 'Vehículos obtenidos correctamente',
+                'datos' => $vehiculos,
+                'total' => $vehiculos->count(),
+                'timestamp' => now()->format('Y-m-d H:i:s')
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
-                'success' => false,
+                'status' => 'error',
                 'message' => 'Error al obtener vehículos del negocio',
                 'error' => $e->getMessage()
             ], 500);
@@ -136,34 +131,48 @@ class DatosRelevantesController extends Controller
             // Calcular días transcurridos
             $diasTranscurridos = $fechaInicial->diffInDays($fechaFinal) + 1;
 
-            // Calcular productividad total (suma de ingresos, EXCLUIR ingresos de caja operativa)
-            $productividad = $query->clone()
+            // ✅ INGRESOS BRUTOS (Total de ingresos SIN excluir caja operativa)
+            $ingresosBrutos = $query->clone()
                 ->where('tipo_de_transaccion', 'ingreso')
-                ->whereNull('caja_operativa_id') // EXCLUIR ingresos de caja operativa (recargas internas)
                 ->sum('importe_total');
+
+            // ✅ EGRESOS BRUTOS (Total de egresos)
+            $egresosBrutos = $query->clone()
+                ->where('tipo_de_transaccion', 'egreso')
+                ->sum('importe_total');
+
+            // ✅ MARGEN BRUTO (Ingresos - Egresos)
+            $margenBruto = $ingresosBrutos - $egresosBrutos;
+
+            // ✅ RENTABILIDAD % ((Margen / Ingresos) * 100)
+            $rentabilidadPorcentaje = $ingresosBrutos > 0
+                ? round(($margenBruto / $ingresosBrutos) * 100, 2)
+                : 0;
 
             // Calcular millas recorridas en servicio
             $millasRecorridas = $query->clone()
                 ->whereNotNull('millas')
                 ->sum('millas');
 
-            // Calcular productividad por día
-            $productividadPorDia = $diasTranscurridos > 0 ?
-                round($productividad / $diasTranscurridos, 2) : 0;
+            // Calcular productividad por día (basado en ingresos brutos)
+            $productividadPorDia = $diasTranscurridos > 0
+                ? round($ingresosBrutos / $diasTranscurridos, 2)
+                : 0;
 
-            // Calcular carga mejor pagada (transacción con mayor importe, EXCLUIR ingresos de caja operativa)
+            // Calcular carga mejor pagada (transacción con mayor importe)
             $cargaMejorPagada = $query->clone()
                 ->where('tipo_de_transaccion', 'ingreso')
-                ->whereNull('caja_operativa_id') // EXCLUIR ingresos de caja operativa (recargas internas)
+                ->whereNull('caja_operativa_id') // Solo cargas reales (no recargas)
                 ->orderBy('importe_total', 'desc')
                 ->first();
 
             // Calcular estimación de pago por milla
-            $estimacionPagoPorMilla = $millasRecorridas > 0 ?
-                round($productividad / $millasRecorridas, 2) : 0;
+            $estimacionPagoPorMilla = $millasRecorridas > 0
+                ? round($ingresosBrutos / $millasRecorridas, 2)
+                : 0;
 
-            // Contar número total de transacciones (ingresos sin caja operativa)
-            $numeroTransacciones = $query->clone()
+            // Contar número total de cargas (ingresos sin caja operativa)
+            $numeroCargas = $query->clone()
                 ->where('tipo_de_transaccion', 'ingreso')
                 ->whereNull('caja_operativa_id')
                 ->count();
@@ -189,66 +198,93 @@ class DatosRelevantesController extends Controller
                     ],
                     [
                         'ranking' => 2,
-                        'item' => 'PRODUCTIVIDAD TOTAL',
-                        'total' => number_format($productividad, 2),
-                        'unidad' => '$',
-                        'valor_numerico' => $productividad,
+                        'item' => 'INGRESOS BRUTOS',
+                        'total' => number_format($ingresosBrutos, 2, '.', ','),
+                        'unidad' => 'USD',
+                        'valor_numerico' => $ingresosBrutos,
                         'icono' => '💰'
                     ],
                     [
                         'ranking' => 3,
+                        'item' => 'EGRESOS BRUTOS',
+                        'total' => number_format($egresosBrutos, 2, '.', ','),
+                        'unidad' => 'USD',
+                        'valor_numerico' => $egresosBrutos,
+                        'icono' => '💸'
+                    ],
+                    [
+                        'ranking' => 4,
+                        'item' => 'MARGEN BRUTO',
+                        'total' => number_format($margenBruto, 2, '.', ','),
+                        'unidad' => 'USD',
+                        'valor_numerico' => $margenBruto,
+                        'icono' => '📊'
+                    ],
+                    [
+                        'ranking' => 5,
+                        'item' => 'RENTABILIDAD %',
+                        'total' => number_format($rentabilidadPorcentaje, 2, '.', ','),
+                        'unidad' => '%',
+                        'valor_numerico' => $rentabilidadPorcentaje,
+                        'icono' => '📈'
+                    ],
+                    [
+                        'ranking' => 6,
                         'item' => 'MILLAS RECORRIDAS EN SERVICIO',
-                        'total' => number_format($millasRecorridas, 2),
+                        'total' => number_format($millasRecorridas, 2, '.', ','),
                         'unidad' => 'millas',
                         'valor_numerico' => $millasRecorridas,
                         'icono' => '🚚'
                     ],
                     [
-                        'ranking' => 4,
+                        'ranking' => 7,
                         'item' => 'PRODUCTIVIDAD POR DÍA',
-                        'total' => number_format($productividadPorDia, 2),
+                        'total' => number_format($productividadPorDia, 2, '.', ','),
                         'unidad' => '$/día',
                         'valor_numerico' => $productividadPorDia,
-                        'icono' => '📊'
+                        'icono' => '📅'
                     ],
                     [
-                        'ranking' => 5,
+                        'ranking' => 8,
                         'item' => 'NÚMERO DE CARGAS',
-                        'total' => $numeroTransacciones,
+                        'total' => $numeroCargas,
                         'unidad' => 'cargas',
                         'icono' => '📦'
                     ],
                     [
-                        'ranking' => 6,
+                        'ranking' => 9,
                         'item' => 'CARGA MEJOR PAGADA',
-                        'total' => $cargaMejorPagada ?
-                            number_format($cargaMejorPagada->importe_total, 2) : '0.00',
-                        'unidad' => '$',
+                        'total' => $cargaMejorPagada
+                            ? number_format($cargaMejorPagada->importe_total, 2, '.', ',')
+                            : '0.00',
+                        'unidad' => 'USD',
                         'valor_numerico' => $cargaMejorPagada ? $cargaMejorPagada->importe_total : 0,
                         'detalle' => $cargaMejorPagada ? [
-                            'cliente' => $cargaMejorPagada->cliente_proveedor,
+                            'cliente' => $cargaMejorPagada->cliente_proveedor ?? 'Sin cliente',
                             'fecha' => Carbon::parse($cargaMejorPagada->fecha)->format('d/m/Y'),
-                            'destino' => $cargaMejorPagada->destino,
-                            'millas' => $cargaMejorPagada->millas
+                            'destino' => $cargaMejorPagada->destino ?? 'Sin destino',
+                            'millas' => $cargaMejorPagada->millas ?? 0
                         ] : null,
                         'icono' => '🏆'
                     ],
                     [
-                        'ranking' => 7,
+                        'ranking' => 10,
                         'item' => 'ESTIMACIÓN PAGO POR MILLA',
-                        'total' => number_format($estimacionPagoPorMilla, 2),
+                        'total' => number_format($estimacionPagoPorMilla, 2, '.', ','),
                         'unidad' => '$/milla',
                         'valor_numerico' => $estimacionPagoPorMilla,
                         'icono' => '🎯'
                     ],
                     [
-                        'ranking' => 8,
+                        'ranking' => 11,
                         'item' => 'PROMEDIO POR CARGA',
-                        'total' => $numeroTransacciones > 0 ?
-                            number_format($productividad / $numeroTransacciones, 2) : '0.00',
+                        'total' => $numeroCargas > 0
+                            ? number_format($ingresosBrutos / $numeroCargas, 2, '.', ',')
+                            : '0.00',
                         'unidad' => '$/carga',
-                        'valor_numerico' => $numeroTransacciones > 0 ?
-                            round($productividad / $numeroTransacciones, 2) : 0,
+                        'valor_numerico' => $numeroCargas > 0
+                            ? round($ingresosBrutos / $numeroCargas, 2)
+                            : 0,
                         'icono' => '💵'
                     ]
                 ]
@@ -297,20 +333,18 @@ class DatosRelevantesController extends Controller
                 $query->where('vehicle_id', $request->vehicle_id);
             }
 
-            // Totales por tipo de transacción (ingresos excluyendo caja operativa, egresos todos)
+            // Totales por tipo de transacción
             $totalIngresos = $query->clone()
                 ->where('tipo_de_transaccion', 'ingreso')
-                ->whereNull('caja_operativa_id') // EXCLUIR ingresos de caja operativa (recargas internas)
                 ->sum('importe_total');
 
             $totalEgresos = $query->clone()
                 ->where('tipo_de_transaccion', 'egreso')
                 ->sum('importe_total');
 
-            // Número de transacciones (ingresos excluyendo caja operativa, egresos todos)
+            // Número de transacciones
             $numeroIngresos = $query->clone()
                 ->where('tipo_de_transaccion', 'ingreso')
-                ->whereNull('caja_operativa_id') // EXCLUIR ingresos de caja operativa (recargas internas)
                 ->count();
 
             $numeroEgresos = $query->clone()
@@ -321,12 +355,14 @@ class DatosRelevantesController extends Controller
             $balanceNeto = $totalIngresos - $totalEgresos;
 
             // Promedio de ingresos por transacción
-            $promedioIngresos = $numeroIngresos > 0 ?
-                round($totalIngresos / $numeroIngresos, 2) : 0;
+            $promedioIngresos = $numeroIngresos > 0
+                ? round($totalIngresos / $numeroIngresos, 2)
+                : 0;
 
             // Promedio de egresos por transacción
-            $promedioEgresos = $numeroEgresos > 0 ?
-                round($totalEgresos / $numeroEgresos, 2) : 0;
+            $promedioEgresos = $numeroEgresos > 0
+                ? round($totalEgresos / $numeroEgresos, 2)
+                : 0;
 
             // Top categorías de gastos
             $topCategoriasGastos = $query->clone()
@@ -340,7 +376,7 @@ class DatosRelevantesController extends Controller
                 ->map(function ($item) {
                     return [
                         'categoria' => $item->categoria->nombre ?? 'Sin categoría',
-                        'total' => number_format($item->total, 2),
+                        'total' => number_format($item->total, 2, '.', ','),
                         'cantidad' => $item->cantidad,
                         'valor_numerico' => round($item->total, 2)
                     ];
@@ -365,10 +401,12 @@ class DatosRelevantesController extends Controller
                     return [
                         'cliente' => $item->cliente_proveedor,
                         'cargas' => $item->numero_cargas,
-                        'total' => number_format($item->total_ingreso, 2),
+                        'total' => number_format($item->total_ingreso, 2, '.', ','),
                         'millas' => round($item->total_millas, 2),
-                        'promedio_por_carga' => $item->numero_cargas > 0 ?
-                            number_format($item->total_ingreso / $item->numero_cargas, 2) : '0.00'
+                        'promedio_por_carga' => $item->numero_cargas > 0
+                            ? number_format($item->total_ingreso / $item->numero_cargas, 2, '.', ',')
+                            : '0.00',
+                        'valor_numerico' => round($item->total_ingreso, 2)
                     ];
                 });
 
@@ -387,7 +425,7 @@ class DatosRelevantesController extends Controller
                     return [
                         'metodo' => $item->metodo->nombre ?? 'Sin método',
                         'cantidad' => $item->cantidad,
-                        'total' => number_format($item->total, 2),
+                        'total' => number_format($item->total, 2, '.', ','),
                         'valor_numerico' => round($item->total, 2)
                     ];
                 });
@@ -397,20 +435,22 @@ class DatosRelevantesController extends Controller
                 [
                     'tipo' => 'Ingresos',
                     'cantidad' => $numeroIngresos,
-                    'total' => number_format($totalIngresos, 2),
-                    'promedio' => number_format($promedioIngresos, 2),
-                    'porcentaje' => ($totalIngresos + $totalEgresos) > 0 ?
-                        round(($totalIngresos / ($totalIngresos + $totalEgresos)) * 100, 2) : 0,
+                    'total' => number_format($totalIngresos, 2, '.', ','),
+                    'promedio' => number_format($promedioIngresos, 2, '.', ','),
+                    'porcentaje' => ($totalIngresos + $totalEgresos) > 0
+                        ? round(($totalIngresos / ($totalIngresos + $totalEgresos)) * 100, 2)
+                        : 0,
                     'color' => '#10B981',
                     'icono' => '📈'
                 ],
                 [
                     'tipo' => 'Egresos',
                     'cantidad' => $numeroEgresos,
-                    'total' => number_format($totalEgresos, 2),
-                    'promedio' => number_format($promedioEgresos, 2),
-                    'porcentaje' => ($totalIngresos + $totalEgresos) > 0 ?
-                        round(($totalEgresos / ($totalIngresos + $totalEgresos)) * 100, 2) : 0,
+                    'total' => number_format($totalEgresos, 2, '.', ','),
+                    'promedio' => number_format($promedioEgresos, 2, '.', ','),
+                    'porcentaje' => ($totalIngresos + $totalEgresos) > 0
+                        ? round(($totalEgresos / ($totalIngresos + $totalEgresos)) * 100, 2)
+                        : 0,
                     'color' => '#EF4444',
                     'icono' => '📉'
                 ]
@@ -420,13 +460,13 @@ class DatosRelevantesController extends Controller
                 'success' => true,
                 'data' => [
                     'resumen_financiero' => [
-                        'total_ingresos' => number_format($totalIngresos, 2),
-                        'total_egresos' => number_format($totalEgresos, 2),
-                        'balance_neto' => number_format($balanceNeto, 2),
+                        'total_ingresos' => number_format($totalIngresos, 2, '.', ','),
+                        'total_egresos' => number_format($totalEgresos, 2, '.', ','),
+                        'balance_neto' => number_format($balanceNeto, 2, '.', ','),
                         'numero_ingresos' => $numeroIngresos,
                         'numero_egresos' => $numeroEgresos,
-                        'promedio_ingresos' => number_format($promedioIngresos, 2),
-                        'promedio_egresos' => number_format($promedioEgresos, 2),
+                        'promedio_ingresos' => number_format($promedioIngresos, 2, '.', ','),
+                        'promedio_egresos' => number_format($promedioEgresos, 2, '.', ','),
                         'valores_numericos' => [
                             'total_ingresos' => $totalIngresos,
                             'total_egresos' => $totalEgresos,
@@ -468,8 +508,7 @@ class DatosRelevantesController extends Controller
             $query = FinancialTransactions::query()
                 ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
                 ->where('estado', true)
-                ->where('tipo_de_transaccion', 'ingreso')
-                ->whereNull('caja_operativa_id'); // EXCLUIR ingresos de caja operativa (recargas internas)
+                ->where('tipo_de_transaccion', 'ingreso');
 
             // Aplicar filtros
             if ($request->negocio_id) {
@@ -492,49 +531,64 @@ class DatosRelevantesController extends Controller
                 ->orderBy('dia')
                 ->get()
                 ->map(function ($item) {
-                    $promedioPorTransaccion = $item->numero_transacciones > 0 ?
-                        round($item->total_dia / $item->numero_transacciones, 2) : 0;
+                    $promedioPorTransaccion = $item->numero_transacciones > 0
+                        ? round($item->total_dia / $item->numero_transacciones, 2)
+                        : 0;
 
-                    $promedioPorMilla = $item->millas_dia > 0 ?
-                        round($item->total_dia / $item->millas_dia, 2) : 0;
+                    $promedioPorMilla = $item->millas_dia > 0
+                        ? round($item->total_dia / $item->millas_dia, 2)
+                        : 0;
 
                     return [
                         'fecha' => Carbon::parse($item->dia)->format('d/m/Y'),
                         'fecha_iso' => Carbon::parse($item->dia)->format('Y-m-d'),
                         'dia_semana' => Carbon::parse($item->dia)->locale('es')->dayName,
-                        'productividad' => round($item->total_dia, 2),
+                        'productividad' => number_format($item->total_dia, 2, '.', ','),
                         'transacciones' => $item->numero_transacciones,
-                        'millas' => round($item->millas_dia, 2),
-                        'promedio_por_transaccion' => $promedioPorTransaccion,
-                        'promedio_por_milla' => $promedioPorMilla
+                        'millas' => number_format($item->millas_dia, 2, '.', ','),
+                        'promedio_por_transaccion' => number_format($promedioPorTransaccion, 2, '.', ','),
+                        'promedio_por_milla' => number_format($promedioPorMilla, 2, '.', ','),
+                        'valores_numericos' => [
+                            'productividad' => round($item->total_dia, 2),
+                            'millas' => round($item->millas_dia, 2),
+                            'promedio_transaccion' => $promedioPorTransaccion,
+                            'promedio_milla' => $promedioPorMilla
+                        ]
                     ];
                 });
 
-            // Calcular estadísticas
-            $promedioProductividad = $productividadDiaria->avg('productividad');
-            $maxProductividad = $productividadDiaria->max('productividad');
-            $minProductividad = $productividadDiaria->min('productividad');
-            $totalProductividad = $productividadDiaria->sum('productividad');
-            $totalMillas = $productividadDiaria->sum('millas');
+            // Calcular estadísticas (valores numéricos)
+            $valoresNumericos = $productividadDiaria->pluck('valores_numericos.productividad');
+            $promedioProductividad = $valoresNumericos->avg();
+            $maxProductividad = $valoresNumericos->max();
+            $minProductividad = $valoresNumericos->min();
+            $totalProductividad = $valoresNumericos->sum();
+
+            $valoresMillas = $productividadDiaria->pluck('valores_numericos.millas');
+            $totalMillas = $valoresMillas->sum();
+
             $totalTransacciones = $productividadDiaria->sum('transacciones');
 
             // Encontrar mejor y peor día
-            $mejorDia = $productividadDiaria->sortByDesc('productividad')->first();
-            $peorDia = $productividadDiaria->where('productividad', '>', 0)->sortBy('productividad')->first();
+            $mejorDia = $productividadDiaria->sortByDesc('valores_numericos.productividad')->first();
+            $peorDia = $productividadDiaria
+                ->where('valores_numericos.productividad', '>', 0)
+                ->sortBy('valores_numericos.productividad')
+                ->first();
 
             return response()->json([
                 'success' => true,
                 'data' => [
                     'productividad_diaria' => $productividadDiaria->values(),
                     'estadisticas' => [
-                        'promedio_diario' => round($promedioProductividad, 2),
-                        'maximo' => round($maxProductividad, 2),
-                        'minimo' => round($minProductividad, 2),
-                        'total' => round($totalProductividad, 2),
-                        'total_millas' => round($totalMillas, 2),
+                        'promedio_diario' => number_format($promedioProductividad, 2, '.', ','),
+                        'maximo' => number_format($maxProductividad, 2, '.', ','),
+                        'minimo' => number_format($minProductividad, 2, '.', ','),
+                        'total' => number_format($totalProductividad, 2, '.', ','),
+                        'total_millas' => number_format($totalMillas, 2, '.', ','),
                         'total_transacciones' => $totalTransacciones,
                         'dias_totales' => $productividadDiaria->count(),
-                        'dias_con_actividad' => $productividadDiaria->where('productividad', '>', 0)->count(),
+                        'dias_con_actividad' => $productividadDiaria->where('valores_numericos.productividad', '>', 0)->count(),
                         'mejor_dia' => $mejorDia,
                         'peor_dia' => $peorDia
                     ]
@@ -576,7 +630,6 @@ class DatosRelevantesController extends Controller
 
                 $ingresos = $query->clone()
                     ->where('tipo_de_transaccion', 'ingreso')
-                    ->whereNull('caja_operativa_id')
                     ->sum('importe_total');
 
                 $egresos = $query->clone()
@@ -602,20 +655,30 @@ class DatosRelevantesController extends Controller
                         'nombre_completo' => "{$vehiculo->marca} {$vehiculo->modelo} ({$vehiculo->numero_placa})",
                     ],
                     'metricas' => [
-                        'ingresos' => round($ingresos, 2),
-                        'egresos' => round($egresos, 2),
-                        'balance' => round($ingresos - $egresos, 2),
-                        'millas' => round($millas, 2),
+                        'ingresos' => number_format($ingresos, 2, '.', ','),
+                        'egresos' => number_format($egresos, 2, '.', ','),
+                        'balance' => number_format($ingresos - $egresos, 2, '.', ','),
+                        'millas' => number_format($millas, 2, '.', ','),
                         'numero_cargas' => $numeroCargas,
-                        'promedio_por_carga' => $numeroCargas > 0 ? round($ingresos / $numeroCargas, 2) : 0,
-                        'pago_por_milla' => $millas > 0 ? round($ingresos / $millas, 2) : 0
+                        'promedio_por_carga' => $numeroCargas > 0
+                            ? number_format($ingresos / $numeroCargas, 2, '.', ',')
+                            : '0.00',
+                        'pago_por_milla' => $millas > 0
+                            ? number_format($ingresos / $millas, 2, '.', ',')
+                            : '0.00',
+                        'valores_numericos' => [
+                            'ingresos' => round($ingresos, 2),
+                            'egresos' => round($egresos, 2),
+                            'balance' => round($ingresos - $egresos, 2)
+                        ]
                     ]
                 ];
             }
 
             // Ordenar por ingresos descendente
             usort($comparativa, function ($a, $b) {
-                return $b['metricas']['ingresos'] <=> $a['metricas']['ingresos'];
+                return $b['metricas']['valores_numericos']['ingresos'] <=>
+                    $a['metricas']['valores_numericos']['ingresos'];
             });
 
             return response()->json([
@@ -643,7 +706,7 @@ class DatosRelevantesController extends Controller
     }
 
     /**
-     * Exportar reporte a Excel (similar a tu imagen)
+     * Exportar reporte a Excel
      */
     public function exportToExcel(Request $request)
     {
