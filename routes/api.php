@@ -33,6 +33,7 @@ use App\Http\Controllers\api\Users\UserController;
 use App\Http\Controllers\api\Vehicles\VehicleController;
 use App\Http\Controllers\api\Vehicles\VehicleDocumentController;
 use App\Http\Controllers\api\Vehicles\VehicleMaintenanceController;
+use App\Http\Controllers\TimelineController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -294,9 +295,18 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/rendicion-cajas-operativas/pdf', [RendicionCajaOperativasController::class, 'exportarPDF']);
 
             //Obtener datos relevantes del dashboard
+            // Obtener vehículos por negocio
+            Route::post('/vehicles-by-business', [DatosRelevantesController::class, 'getVehiclesByBusiness']);
+
+            // Obtener datos relevantes del dashboard
             Route::post('/operation', [DatosRelevantesController::class, 'getOperationReport']);
             Route::post('/operation-summary', [DatosRelevantesController::class, 'getOperationSummary']);
             Route::post('/daily-productivity', [DatosRelevantesController::class, 'getDailyProductivity']);
+
+            // Comparar vehículos de un negocio
+            Route::post('/compare-vehicles', [DatosRelevantesController::class, 'compareVehicles']);
+
+            // Exportar reportes
             Route::post('/export-excel', [DatosRelevantesController::class, 'exportToExcel']);
             Route::post('/export-excel-fiscal', [FinancialTransactionController::class, 'exportFiscal']);
         });
@@ -354,6 +364,20 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('pending-payments', [PendingPaymentsController::class, 'index']);
         Route::post('pending-payments/{id}/process', [PendingPaymentsController::class, 'processPayment']);
         Route::post('pending-payments/{id}/cancel', [PendingPaymentsController::class, 'cancelPayment']);
+
+
+        Route::get('/timeline/my', [TimelineController::class, 'myTimeline']);
+        Route::get('/timeline/user/{userId}', [TimelineController::class, 'userTimeline'])->where('userId', '[0-9]+');
+        Route::get('/timeline/business/{businessId}', [TimelineController::class, 'businessTimeline'])->where('businessId', '[0-9]+');
+        Route::get('/timeline/{id}', [TimelineController::class, 'show'])->where('id', '[0-9]+');
+        Route::post('/timeline', [TimelineController::class, 'store']);
+        Route::put('/timeline/{id}', [TimelineController::class, 'update'])->where('id', '[0-9]+');
+        Route::post('/timeline/{id}', [TimelineController::class, 'update'])->where('id', '[0-9]+');
+        Route::delete('/timeline/{id}', [TimelineController::class, 'destroy'])->where('id', '[0-9]+');
+        Route::post('/timeline/reordenar', [TimelineController::class, 'reordenar']);
+        Route::post('/timeline/filtrar/estado', [TimelineController::class, 'filtrarPorEstado']);
+        Route::post('/timeline/filtrar/fechas', [TimelineController::class, 'filtrarPorFechas']);
+        Route::post('/timeline/estadisticas', [TimelineController::class, 'estadisticas']);
     });
 
     /*
