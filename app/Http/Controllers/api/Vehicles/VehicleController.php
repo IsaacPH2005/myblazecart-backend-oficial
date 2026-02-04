@@ -21,8 +21,21 @@ class VehicleController extends Controller
     public function index()
     {
         $vehicles = Vehicle::with('user.generalData', 'documents', 'negocio')->get();
-        return response()->json(['message' => 'Lista de vehículos', "datos" => $vehicles]);
+
+        // Agregar la URL completa de la foto a cada vehículo
+        $vehicles->transform(function ($vehicle) {
+            if ($vehicle->foto) {
+                $vehicle->foto_url = asset($vehicle->foto);
+            }
+            return $vehicle;
+        });
+
+        return response()->json([
+            'message' => 'Lista de vehículos',
+            'datos' => $vehicles
+        ]);
     }
+
 
     /**
      * Crear un nuevo vehículo
