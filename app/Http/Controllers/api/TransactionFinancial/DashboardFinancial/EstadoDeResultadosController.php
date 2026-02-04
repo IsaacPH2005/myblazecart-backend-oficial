@@ -372,7 +372,6 @@ class EstadoDeResultadosController extends Controller
                             $query->select('id', 'nombre', 'descripcion');
                         },
                         'cajaOperativa:id,nombre,descripcion,saldo',
-                        'archivos:id,financial_transaction_id,nombre_archivo,ruta_archivo,tipo_archivo,tamano_archivo,created_at',
                         'pendingPayment:id,financial_transaction_id,monto_pendiente,fecha_vencimiento,estado'
                     ])
                     ->orderBy('fecha', 'desc')
@@ -448,6 +447,7 @@ class EstadoDeResultadosController extends Controller
                             'id' => $trans->estadoDeTransaccion->id,
                             'nombre' => $trans->estadoDeTransaccion->nombre,
                             'descripcion' => $trans->estadoDeTransaccion->descripcion ?? '',
+                            'color' => '#6B7280',
                         ] : null,
 
                         'caja_operativa' => $trans->cajaOperativa ? [
@@ -458,28 +458,10 @@ class EstadoDeResultadosController extends Controller
                             'saldo_formateado' => number_format($trans->cajaOperativa->saldo, 2, '.', ','),
                         ] : null,
 
-                        'archivos' => $trans->archivos->map(function ($archivo) {
-                            return [
-                                'id' => $archivo->id,
-                                'nombre_archivo' => $archivo->nombre_archivo,
-                                'ruta_archivo' => $archivo->ruta_archivo,
-                                'tipo_archivo' => $archivo->tipo_archivo,
-                                'tamano_archivo' => $archivo->tamano_archivo,
-                                'tamano_formateado' => $this->formatearTamanoArchivo($archivo->tamano_archivo),
-                                'url_completa' => $this->getUrlCompleta($archivo->ruta_archivo),
-                                'es_imagen' => $this->esImagen($archivo->tipo_archivo),
-                                'fecha_subida' => $archivo->created_at ? $archivo->created_at->format('Y-m-d H:i:s') : null,
-                                'fecha_subida_formateada' => $archivo->created_at ? $archivo->created_at->format('d/m/Y H:i') : null,
-                            ];
-                        })->toArray(),
-
-                        'total_archivos' => $trans->archivos->count(),
-                        'total_imagenes' => $trans->archivos->filter(function ($a) {
-                            return $this->esImagen($a->tipo_archivo);
-                        })->count(),
-                        'tiene_imagenes' => $trans->archivos->filter(function ($a) {
-                            return $this->esImagen($a->tipo_archivo);
-                        })->count() > 0,
+                        'total_archivos' => 0,
+                        'total_imagenes' => 0,
+                        'tiene_imagenes' => false,
+                        'archivos' => [],
 
                         'pago_pendiente' => $trans->pendingPayment ? [
                             'id' => $trans->pendingPayment->id,
@@ -786,6 +768,7 @@ class EstadoDeResultadosController extends Controller
                     'marca' => $vehicle->marca,
                     'modelo' => $vehicle->modelo,
                     'año' => $vehicle->año,
+                    'color' => $vehicle->color,
                     'tipo_vehiculo' => $vehicle->tipo_vehiculo,
                     'tipo_propiedad' => strtoupper($vehicle->tipo_propiedad),
                     'usuario_asignado' => $assignedUserName,
