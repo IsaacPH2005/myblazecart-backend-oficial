@@ -371,8 +371,7 @@ class EstadoDeResultadosController extends Controller
                         'estadoDeTransaccion' => function ($query) {
                             $query->select('id', 'nombre', 'descripcion');
                         },
-                        'cajaOperativa:id,nombre,descripcion,saldo',
-                        'pendingPayment:id,financial_transaction_id,monto_pendiente,fecha_vencimiento,estado'
+                        'cajaOperativa:id,nombre,descripcion,saldo'
                     ])
                     ->orderBy('fecha', 'desc')
                     ->orderBy('created_at', 'desc')
@@ -463,13 +462,7 @@ class EstadoDeResultadosController extends Controller
                         'tiene_imagenes' => false,
                         'archivos' => [],
 
-                        'pago_pendiente' => $trans->pendingPayment ? [
-                            'id' => $trans->pendingPayment->id,
-                            'monto_pendiente' => floatval($trans->pendingPayment->monto_pendiente),
-                            'monto_pendiente_formateado' => number_format($trans->pendingPayment->monto_pendiente, 2, '.', ','),
-                            'fecha_vencimiento' => $trans->pendingPayment->fecha_vencimiento,
-                            'estado' => $trans->pendingPayment->estado,
-                        ] : null,
+                        'pago_pendiente' => null,
 
                         'created_at' => $trans->created_at ? $trans->created_at->format('Y-m-d H:i:s') : null,
                         'updated_at' => $trans->updated_at ? $trans->updated_at->format('Y-m-d H:i:s') : null,
