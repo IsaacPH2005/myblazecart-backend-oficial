@@ -363,7 +363,9 @@ class EstadoDeResultadosController extends Controller
                         'metodo' => function ($query) {
                             $query->select('id', 'nombre');
                         },
-                        'categoria:id,nombre,descripcion,tipo',
+                        'categoria' => function ($query) {
+                            $query->select('id', 'nombre', 'codigo', 'clasificacion', 'subcategoria', 'agrupacion', 'descripcion');
+                        },
                         'user.generalData:user_id,nombre,apellido,documento_identidad,celular',
                         'vehicle:id,codigo_unico,numero_placa,marca,modelo,año,tipo_vehiculo,tipo_propiedad',
                         'estadoDeTransaccion:id,nombre,descripcion,color',
@@ -412,8 +414,11 @@ class EstadoDeResultadosController extends Controller
                         'categoria' => $trans->categoria ? [
                             'id' => $trans->categoria->id,
                             'nombre' => $trans->categoria->nombre,
+                            'codigo' => $trans->categoria->codigo ?? '',
+                            'clasificacion' => $trans->categoria->clasificacion ?? '',
+                            'subcategoria' => $trans->categoria->subcategoria ?? '',
+                            'agrupacion' => $trans->categoria->agrupacion ?? '',
                             'descripcion' => $trans->categoria->descripcion ?? '',
-                            'tipo' => $trans->categoria->tipo ?? null,
                         ] : null,
 
                         'usuario' => $trans->user && $trans->user->generalData ? [
