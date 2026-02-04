@@ -186,7 +186,7 @@ class EstadoDeResultadosController extends Controller
                         ->select(
                             'transaction_states.id as estado_id',
                             'transaction_states.nombre as estado_nombre',
-                            'transaction_states.descripcion as estado_descripcion',
+                            DB::raw('COALESCE(transaction_states.descripcion, "") as estado_descripcion'),
                             'financial_transactions.tipo_de_transaccion',
                             DB::raw('COUNT(*) as total_transacciones'),
                             DB::raw('SUM(importe_total) as total_importe')
@@ -209,7 +209,7 @@ class EstadoDeResultadosController extends Controller
                             $estadosPorCaja[$estadoId] = [
                                 'estado_id' => $estadoId,
                                 'estado_nombre' => $estadoNombre,
-                                'estado_descripcion' => $transaccion->estado_descripcion,
+                                'estado_descripcion' => $transaccion->estado_descripcion ?? '',
                                 'ingresos_recargas' => 0,
                                 'egresos_subtracciones' => 0,
                                 'total_transacciones_recargas' => 0,
@@ -296,7 +296,7 @@ class EstadoDeResultadosController extends Controller
                 ->select(
                     'transaction_states.id as estado_id',
                     'transaction_states.nombre as estado_nombre',
-                    'transaction_states.descripcion as estado_descripcion',
+                    DB::raw('COALESCE(transaction_states.descripcion, "") as estado_descripcion'),
                     'financial_transactions.tipo_de_transaccion',
                     DB::raw('COUNT(*) as total_transacciones'),
                     DB::raw('SUM(importe_total) as total_importe')
@@ -319,7 +319,7 @@ class EstadoDeResultadosController extends Controller
                     $estadosFinancieros[$estadoId] = [
                         'estado_id' => $estadoId,
                         'estado_nombre' => $estadoNombre,
-                        'estado_descripcion' => $transaccion->estado_descripcion,
+                        'estado_descripcion' => $transaccion->estado_descripcion ?? '',
                         'ingresos' => 0,
                         'egresos' => 0,
                         'total_transacciones_ingresos' => 0,
@@ -360,7 +360,9 @@ class EstadoDeResultadosController extends Controller
                 $transaccionesDetalle = $queryDetalles
                     ->with([
                         'negocio:id,nombre,descripcion',
-                        'metodo:id,nombre,descripcion',
+                        'metodo' => function ($query) {
+                            $query->select('id', 'nombre');
+                        },
                         'categoria:id,nombre,descripcion,tipo',
                         'user.generalData:user_id,nombre,apellido,documento_identidad,celular',
                         'vehicle:id,codigo_unico,numero_placa,marca,modelo,año,tipo_vehiculo,tipo_propiedad',
@@ -398,19 +400,19 @@ class EstadoDeResultadosController extends Controller
                         'negocio' => $trans->negocio ? [
                             'id' => $trans->negocio->id,
                             'nombre' => $trans->negocio->nombre,
-                            'descripcion' => $trans->negocio->descripcion,
+                            'descripcion' => $trans->negocio->descripcion ?? '',
                         ] : null,
 
                         'metodo_pago' => $trans->metodo ? [
                             'id' => $trans->metodo->id,
                             'nombre' => $trans->metodo->nombre,
-                            'descripcion' => $trans->metodo->descripcion,
+                            'descripcion' => null,
                         ] : null,
 
                         'categoria' => $trans->categoria ? [
                             'id' => $trans->categoria->id,
                             'nombre' => $trans->categoria->nombre,
-                            'descripcion' => $trans->categoria->descripcion,
+                            'descripcion' => $trans->categoria->descripcion ?? '',
                             'tipo' => $trans->categoria->tipo ?? null,
                         ] : null,
 
@@ -438,14 +440,14 @@ class EstadoDeResultadosController extends Controller
                         'estado_transaccion' => $trans->estadoDeTransaccion ? [
                             'id' => $trans->estadoDeTransaccion->id,
                             'nombre' => $trans->estadoDeTransaccion->nombre,
-                            'descripcion' => $trans->estadoDeTransaccion->descripcion,
+                            'descripcion' => $trans->estadoDeTransaccion->descripcion ?? '',
                             'color' => $trans->estadoDeTransaccion->color ?? '#6B7280',
                         ] : null,
 
                         'caja_operativa' => $trans->cajaOperativa ? [
                             'id' => $trans->cajaOperativa->id,
                             'nombre' => $trans->cajaOperativa->nombre,
-                            'descripcion' => $trans->cajaOperativa->descripcion,
+                            'descripcion' => $trans->cajaOperativa->descripcion ?? '',
                             'saldo' => floatval($trans->cajaOperativa->saldo),
                             'saldo_formateado' => number_format($trans->cajaOperativa->saldo, 2, '.', ','),
                         ] : null,
