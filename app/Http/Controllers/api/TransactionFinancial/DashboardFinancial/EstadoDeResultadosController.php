@@ -371,7 +371,10 @@ class EstadoDeResultadosController extends Controller
                         'estadoDeTransaccion' => function ($query) {
                             $query->select('id', 'nombre', 'descripcion');
                         },
-                        'cajaOperativa:id,nombre,descripcion,saldo'
+                        'cajaOperativa:id,nombre,descripcion,saldo',
+                        'pendingPayment' => function ($query) {
+                            $query->select('id', 'financial_transaction_id', 'monto', 'descripcion', 'estado', 'fecha_pago');
+                        }
                     ])
                     ->orderBy('fecha', 'desc')
                     ->orderBy('created_at', 'desc')
@@ -462,7 +465,15 @@ class EstadoDeResultadosController extends Controller
                         'tiene_imagenes' => false,
                         'archivos' => [],
 
-                        'pago_pendiente' => null,
+                        'pago_pendiente' => $trans->pendingPayment ? [
+                            'id' => $trans->pendingPayment->id,
+                            'monto' => floatval($trans->pendingPayment->monto),
+                            'monto_formateado' => number_format($trans->pendingPayment->monto, 2, '.', ','),
+                            'descripcion' => $trans->pendingPayment->descripcion ?? '',
+                            'estado' => $trans->pendingPayment->estado,
+                            'fecha_pago' => $trans->pendingPayment->fecha_pago ? $trans->pendingPayment->fecha_pago->format('Y-m-d') : null,
+                            'fecha_pago_formateada' => $trans->pendingPayment->fecha_pago ? $trans->pendingPayment->fecha_pago->format('d/m/Y') : null,
+                        ] : null,
 
                         'created_at' => $trans->created_at ? $trans->created_at->format('Y-m-d H:i:s') : null,
                         'updated_at' => $trans->updated_at ? $trans->updated_at->format('Y-m-d H:i:s') : null,
