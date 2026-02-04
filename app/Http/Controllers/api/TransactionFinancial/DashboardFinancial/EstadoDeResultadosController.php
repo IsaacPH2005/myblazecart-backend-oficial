@@ -375,8 +375,8 @@ class EstadoDeResultadosController extends Controller
                         'pendingPayment' => function ($query) {
                             $query->select('id', 'financial_transaction_id', 'monto', 'descripcion', 'estado', 'fecha_pago');
                         },
-                        'files' => function ($query) {
-                            $query->select('id', 'financial_transaction_id', 'ruta_archivo', 'nombre_archivo', 'tipo_archivo', 'tamano_archivo');
+                        'archivos' => function ($query) {
+                            $query->select('id', 'financial_transaction_id', 'ruta', 'nombre_original', 'mime_type', 'estado');
                         }
                     ])
                     ->orderBy('fecha', 'desc')
@@ -389,26 +389,32 @@ class EstadoDeResultadosController extends Controller
                     $totalImagenes = 0;
                     $tieneImagenes = false;
 
-                    if ($trans->files && $trans->files->count() > 0) {
-                        $totalArchivos = $trans->files->count();
+                    if ($trans->archivos && $trans->archivos->count() > 0) {
+                        $totalArchivos = $trans->archivos->count();
 
-                        foreach ($trans->files as $archivo) {
-                            $esImagen = $this->esImagen($archivo->tipo_archivo);
+                        foreach ($trans->archivos as $archivo) {
+                            $esImagen = $this->esImagen($archivo->mime_type);
 
                             if ($esImagen) {
                                 $totalImagenes++;
                                 $tieneImagenes = true;
                             }
 
+                            $archivoSize = 0;
+                            if ($archivo->ruta && Storage::disk('public')->exists($archivo->ruta)) {
+                                $archivoSize = Storage::disk('public')->size($archivo->ruta);
+                            }
+
                             $archivosData[] = [
                                 'id' => $archivo->id,
-                                'nombre_archivo' => $archivo->nombre_archivo,
-                                'tipo_archivo' => $archivo->tipo_archivo,
-                                'tamano_archivo' => $archivo->tamano_archivo,
-                                'tamano_formateado' => $this->formatearTamanoArchivo($archivo->tamano_archivo),
-                                'ruta_archivo' => $archivo->ruta_archivo,
-                                'url_completa' => $this->getUrlCompleta($archivo->ruta_archivo),
+                                'nombre_archivo' => $archivo->nombre_original,
+                                'tipo_archivo' => $archivo->mime_type,
+                                'tamano_archivo' => $archivoSize,
+                                'tamano_formateado' => $this->formatearTamanoArchivo($archivoSize),
+                                'ruta_archivo' => $archivo->ruta,
+                                'url_completa' => $this->getUrlCompleta($archivo->ruta),
                                 'es_imagen' => $esImagen,
+                                'estado' => $archivo->estado ?? 'activo',
                                 'created_at' => $archivo->created_at ? $archivo->created_at->format('Y-m-d H:i:s') : null,
                             ];
                         }
