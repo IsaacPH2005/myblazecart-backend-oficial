@@ -374,6 +374,9 @@ class EstadoDeResultadosController extends Controller
                         'cajaOperativa:id,nombre,descripcion,saldo',
                         'pendingPayment' => function ($query) {
                             $query->select('id', 'financial_transaction_id', 'monto', 'descripcion', 'estado', 'fecha_pago');
+                        },
+                        'files' => function ($query) {
+                            $query->select('id', 'financial_transaction_id', 'ruta_archivo', 'nombre_archivo', 'tipo_archivo', 'tamano_archivo');
                         }
                     ])
                     ->orderBy('fecha', 'desc')
@@ -381,6 +384,36 @@ class EstadoDeResultadosController extends Controller
                     ->get();
 
                 $estadoData['transacciones_detalladas'] = $transaccionesDetalle->map(function ($trans) {
+                    $archivosData = [];
+                    $totalArchivos = 0;
+                    $totalImagenes = 0;
+                    $tieneImagenes = false;
+
+                    if ($trans->files && $trans->files->count() > 0) {
+                        $totalArchivos = $trans->files->count();
+
+                        foreach ($trans->files as $archivo) {
+                            $esImagen = $this->esImagen($archivo->tipo_archivo);
+
+                            if ($esImagen) {
+                                $totalImagenes++;
+                                $tieneImagenes = true;
+                            }
+
+                            $archivosData[] = [
+                                'id' => $archivo->id,
+                                'nombre_archivo' => $archivo->nombre_archivo,
+                                'tipo_archivo' => $archivo->tipo_archivo,
+                                'tamano_archivo' => $archivo->tamano_archivo,
+                                'tamano_formateado' => $this->formatearTamanoArchivo($archivo->tamano_archivo),
+                                'ruta_archivo' => $archivo->ruta_archivo,
+                                'url_completa' => $this->getUrlCompleta($archivo->ruta_archivo),
+                                'es_imagen' => $esImagen,
+                                'created_at' => $archivo->created_at ? $archivo->created_at->format('Y-m-d H:i:s') : null,
+                            ];
+                        }
+                    }
+
                     return [
                         'id' => $trans->id,
                         'numero_transaccion' => $trans->numero_transaccion,
@@ -460,10 +493,10 @@ class EstadoDeResultadosController extends Controller
                             'saldo_formateado' => number_format($trans->cajaOperativa->saldo, 2, '.', ','),
                         ] : null,
 
-                        'total_archivos' => 0,
-                        'total_imagenes' => 0,
-                        'tiene_imagenes' => false,
-                        'archivos' => [],
+                        'total_archivos' => $totalArchivos,
+                        'total_imagenes' => $totalImagenes,
+                        'tiene_imagenes' => $tieneImagenes,
+                        'archivos' => $archivosData,
 
                         'pago_pendiente' => $trans->pendingPayment ? [
                             'id' => $trans->pendingPayment->id,
