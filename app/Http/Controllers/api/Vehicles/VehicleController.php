@@ -20,12 +20,9 @@ class VehicleController extends Controller
      */
     public function index()
     {
-        $vehicles = Vehicle::with('user.generalData', 'documents', 'negocio')->get();
-
-        // Agregar la URL completa de la foto a cada vehículo
-        $vehicles->transform(function ($vehicle) {
+        $vehicles = Vehicle::with('user.generalData', 'documents', 'negocio')->get()->map(function ($vehicle) {
             if ($vehicle->foto) {
-                $vehicle->foto_url = asset($vehicle->foto);
+                $vehicle->foto_url = asset('vehicle_photos/' . $vehicle->foto);
             }
             return $vehicle;
         });
