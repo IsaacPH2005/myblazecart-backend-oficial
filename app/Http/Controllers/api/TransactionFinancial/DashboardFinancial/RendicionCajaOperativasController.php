@@ -142,7 +142,11 @@ class RendicionCajaOperativasController extends Controller
                         ];
                     });
 
-                $detalleIngresos = $ingresosTransacciones->merge($ingresosHistorialDetalle)->sortByDesc('fecha')->values();
+                // ✅ FIX: Convertir a Collection antes de merge
+                $detalleIngresos = collect($ingresosTransacciones)
+                    ->merge(collect($ingresosHistorialDetalle))
+                    ->sortByDesc('fecha')
+                    ->values();
 
                 // ==============================================================
                 // OBTENER DETALLE DE EGRESOS
@@ -190,7 +194,11 @@ class RendicionCajaOperativasController extends Controller
                         ];
                     });
 
-                $detalleEgresos = $egresosTransacciones->merge($egresosHistorialDetalle)->sortByDesc('fecha')->values();
+                // ✅ FIX: Convertir a Collection antes de merge
+                $detalleEgresos = collect($egresosTransacciones)
+                    ->merge(collect($egresosHistorialDetalle))
+                    ->sortByDesc('fecha')
+                    ->values();
 
                 // ==============================================================
                 // CONSTRUIR RESULTADO
@@ -218,8 +226,8 @@ class RendicionCajaOperativasController extends Controller
                         'cantidad_ingresos' => $detalleIngresos->count(),
                         'cantidad_egresos' => $detalleEgresos->count(),
                     ],
-                    'detalle_ingresos' => $detalleIngresos,
-                    'detalle_egresos' => $detalleEgresos,
+                    'detalle_ingresos' => $detalleIngresos->toArray(),
+                    'detalle_egresos' => $detalleEgresos->toArray(),
                     'fuentes_ingresos' => [
                         'financial_transactions' => floatval($ingresosFinancialTransactions),
                         'historial_caja' => floatval($ingresosHistorial)
@@ -423,8 +431,8 @@ class RendicionCajaOperativasController extends Controller
                     'total_egresos' => $totalEgresos,
                     'saldo_final' => $saldoFinal,
                 ],
-                'ingresos' => $ingresos,
-                'egresos' => $egresos
+                'ingresos' => $ingresos->toArray(),
+                'egresos' => $egresos->toArray()
             ];
         }
 
