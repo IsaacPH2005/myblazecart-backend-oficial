@@ -368,7 +368,9 @@ class EstadoDeResultadosController extends Controller
                         },
                         'user.generalData:user_id,nombre,apellido,documento_identidad,celular',
                         'vehicle:id,codigo_unico,numero_placa,marca,modelo,año,tipo_vehiculo,tipo_propiedad',
-                        'estadoDeTransaccion:id,nombre,descripcion,color',
+                        'estadoDeTransaccion' => function ($query) {
+                            $query->select('id', 'nombre', 'descripcion');
+                        },
                         'cajaOperativa:id,nombre,descripcion,saldo',
                         'archivos:id,financial_transaction_id,nombre_archivo,ruta_archivo,tipo_archivo,tamano_archivo,created_at',
                         'pendingPayment:id,financial_transaction_id,monto_pendiente,fecha_vencimiento,estado'
@@ -446,7 +448,7 @@ class EstadoDeResultadosController extends Controller
                             'id' => $trans->estadoDeTransaccion->id,
                             'nombre' => $trans->estadoDeTransaccion->nombre,
                             'descripcion' => $trans->estadoDeTransaccion->descripcion ?? '',
-                            'color' => $trans->estadoDeTransaccion->color ?? '#6B7280',
+                            'color' => '#6B7280',
                         ] : null,
 
                         'caja_operativa' => $trans->cajaOperativa ? [
