@@ -53,7 +53,7 @@ class FinancialTransactionController extends Controller
         }
 
         // Filtro por búsqueda
-        if ($request->has('search')) {
+        if ($request->has('search') && !empty($request->search)) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('item', 'like', '%' . $search . '%')
@@ -64,32 +64,62 @@ class FinancialTransactionController extends Controller
         }
 
         // Filtro por tipo de transacción
-        if ($request->has('tipo')) {
+        if ($request->has('tipo') && !empty($request->tipo)) {
             $query->where('tipo_de_transaccion', $request->tipo);
         }
 
         // Filtro por estado
-        if ($request->has('estado')) {
+        if ($request->has('estado') && !empty($request->estado)) {
             $query->where('estado_de_transaccion_id', $request->estado);
         }
 
-        // Filtro por categoría (por ID)
-        if ($request->has('categoria')) {
-            $query->where('categoria_id', $request->categoria);
+        // ✅ Filtro por negocio (CORREGIDO)
+        if ($request->has('negocio_id') && !empty($request->negocio_id) && $request->negocio_id != '') {
+            $query->where('negocio_id', $request->negocio_id);
         }
 
-        // Filtro por subcategoría
-        if ($request->has('subcategoria')) {
+        // ✅ Filtro por vehículo (CORREGIDO)
+        if ($request->has('vehicle_id') && !empty($request->vehicle_id) && $request->vehicle_id != '') {
+            $query->where('vehicle_id', $request->vehicle_id);
+        }
+
+        // ✅ Filtro por categoría (por ID o nombre)
+        if ($request->has('categoria') && !empty($request->categoria)) {
+            // Si es un ID numérico
+            if (is_numeric($request->categoria)) {
+                $query->where('categoria_id', $request->categoria);
+            } else {
+                // Si es un nombre, buscar por relación
+                $query->whereHas('categoria', function ($q) use ($request) {
+                    $q->where('nombre', 'like', '%' . $request->categoria . '%');
+                });
+            }
+        }
+
+        // ✅ Filtro por categoría usando ID específicamente
+        if ($request->has('categoria_id') && !empty($request->categoria_id) && $request->categoria_id != '') {
+            $query->where('categoria_id', $request->categoria_id);
+        }
+
+        // ✅ Filtro por subcategoría (campo directo en financial_transactions)
+        if ($request->has('subcategoria') && !empty($request->subcategoria) && $request->subcategoria != '') {
             $query->where('subcategoria', $request->subcategoria);
         }
 
+        // ✅ Filtro avanzado: buscar subcategoría también en la tabla categories
+        if ($request->has('subcategoria_categoria') && !empty($request->subcategoria_categoria) && $request->subcategoria_categoria != '') {
+            $query->whereHas('categoria', function ($q) use ($request) {
+                $q->where('subcategoria', 'like', '%' . $request->subcategoria_categoria . '%');
+            });
+        }
+
         // Filtros por caja operativa
-        if ($request->has('caja_operativa_id')) {
+        if ($request->has('caja_operativa_id') && !empty($request->caja_operativa_id) && $request->caja_operativa_id != '') {
             $cajaOperativaId = $request->caja_operativa_id;
             $query->where('caja_operativa_id', $cajaOperativaId);
 
             // Si se especifica un tipo de movimiento en caja (ingreso, egreso o ambos)
-            if ($request->has('tipo_movimiento_caja')) {
+            if ($request->has('tipo_movimiento_caja') && !empty($request->tipo_movimiento_caja)) {
                 $tipoMovimientoCaja = $request->tipo_movimiento_caja;
                 if ($tipoMovimientoCaja === 'ingreso') {
                     $query->where('tipo_de_transaccion', 'Ingreso');
@@ -107,7 +137,7 @@ class FinancialTransactionController extends Controller
             ->where('tipo_de_transaccion', 'Ingreso')
             ->where(function ($q) {
                 $q->where('subcategoria', '!=', 'Transferencia')
-                    ->orWhereNull('subcategoria'); // Incluir NULL como ingresos reales
+                    ->orWhereNull('subcategoria');
             })
             ->sum('importe_total');
 
@@ -131,7 +161,6 @@ class FinancialTransactionController extends Controller
             foreach ($cajasConTransacciones as $cajaId) {
                 $cajaQuery = (clone $globalQuery)->where('caja_operativa_id', $cajaId);
 
-                // Excluir transferencias en el cálculo por caja
                 $ingresosCaja = (clone $cajaQuery)
                     ->where('tipo_de_transaccion', 'Ingreso')
                     ->where(function ($q) {
@@ -166,13 +195,18 @@ class FinancialTransactionController extends Controller
         $perPage = $request->get('per_page', 15);
         $items = $query->paginate($perPage);
 
-        // Formatear fechas para mostrar
+        // Formatear fechas y agregar URL de foto del vehículo
         $transactions = $items->items();
         foreach ($transactions as $transaction) {
             if ($transaction->fecha) {
                 $transaction->fecha_formateada = Carbon::parse($transaction->fecha)->format('d/m/Y');
             } else {
                 $transaction->fecha_formateada = null;
+            }
+
+            // ✅ Agregar URL completa de la foto del vehículo si existe
+            if ($transaction->vehicle && $transaction->vehicle->foto) {
+                $transaction->vehicle->foto_url = asset($transaction->vehicle->foto);
             }
         }
 
