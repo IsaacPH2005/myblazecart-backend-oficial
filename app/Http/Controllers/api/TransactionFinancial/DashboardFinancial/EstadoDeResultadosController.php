@@ -448,7 +448,6 @@ class EstadoDeResultadosController extends Controller
                             'id' => $trans->estadoDeTransaccion->id,
                             'nombre' => $trans->estadoDeTransaccion->nombre,
                             'descripcion' => $trans->estadoDeTransaccion->descripcion ?? '',
-                            'color' => '#6B7280',
                         ] : null,
 
                         'caja_operativa' => $trans->cajaOperativa ? [
@@ -787,7 +786,6 @@ class EstadoDeResultadosController extends Controller
                     'marca' => $vehicle->marca,
                     'modelo' => $vehicle->modelo,
                     'año' => $vehicle->año,
-                    'color' => $vehicle->color,
                     'tipo_vehiculo' => $vehicle->tipo_vehiculo,
                     'tipo_propiedad' => strtoupper($vehicle->tipo_propiedad),
                     'usuario_asignado' => $assignedUserName,
