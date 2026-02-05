@@ -11,6 +11,8 @@ class OperatingBox extends Model
     protected $fillable = [
         'nombre',
         'saldo',
+        'negocio_id',
+        'vehicle_id', // ✅ AGREGAR
         'descripcion',
         'estado',
     ];
@@ -19,6 +21,11 @@ class OperatingBox extends Model
         'saldo' => 'decimal:2',
     ];
 
+    // ✅ NUEVA RELACIÓN con vehículo
+    public function vehicle()
+    {
+        return $this->belongsTo(Vehicle::class, 'vehicle_id');
+    }
     // Relación con FinancialTransaction
     public function transaccionesFinancieras()
     {

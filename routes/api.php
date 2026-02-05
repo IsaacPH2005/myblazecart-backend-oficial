@@ -321,9 +321,27 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('movements-boxes/{id}', [MovementBoxController::class, 'show']);
 
 
-        Route::apiResource('operating-boxes', OperatingBoxController::class);
-        Route::post('operating-boxes/{id}/activate', [OperatingBoxController::class, 'activate']);
-        Route::delete('/operating-boxes/{id}/delete-permanent', [OperatingBoxController::class, 'deletePermanent']);
+        // Rutas para Cajas Operativas (Operating Boxes)
+        Route::prefix('operating-boxes')->group(function () {
+            // ✅ Rutas de listado y consulta
+            Route::get('/', [OperatingBoxController::class, 'index']);
+            Route::get('/actives', [OperatingBoxController::class, 'boxActives']);
+            Route::get('/vehicles-by-business', [OperatingBoxController::class, 'getVehiclesByBusiness']);
+            Route::get('/summary-by-business', [OperatingBoxController::class, 'summaryByBusiness']);
+            Route::get('/check-vehicle-box', [OperatingBoxController::class, 'checkVehicleBox']);
+            Route::get('/{id}', [OperatingBoxController::class, 'show']);
+
+            // ✅ Rutas de creación y actualización
+            Route::post('/', [OperatingBoxController::class, 'store']);
+            Route::put('/{id}', [OperatingBoxController::class, 'update']);
+
+            // ✅ Rutas de activación/desactivación
+            Route::post('/{id}/activate', [OperatingBoxController::class, 'activate']);
+            Route::delete('/{id}', [OperatingBoxController::class, 'destroy']); // Desactivar (soft delete)
+
+            // ✅ Ruta de eliminación permanente
+            Route::delete('/{id}/delete-permanent', [OperatingBoxController::class, 'deletePermanent']);
+        });
 
         Route::apiResource('categories', CategoryController::class);
         Route::post('/categories-excel/import', [CategoryController::class, 'import']);
