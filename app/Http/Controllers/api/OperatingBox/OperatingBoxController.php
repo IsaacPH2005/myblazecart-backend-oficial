@@ -8,6 +8,7 @@ use App\Models\OperatingBoxHistorie;
 use App\Models\Vehicle;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class OperatingBoxController extends Controller
@@ -17,29 +18,38 @@ class OperatingBoxController extends Controller
      */
     public function index(Request $request)
     {
-        $query = OperatingBox::with(['negocio', 'vehicle']);
+        try {
+            $query = OperatingBox::with(['negocio', 'vehicle']);
 
-        // Filtro por negocio
-        if ($request->has('negocio_id') && !empty($request->negocio_id)) {
-            $query->where('negocio_id', $request->negocio_id);
+            // Filtro por negocio
+            if ($request->has('negocio_id') && !empty($request->negocio_id)) {
+                $query->where('negocio_id', $request->negocio_id);
+            }
+
+            // Filtro por vehículo
+            if ($request->has('vehicle_id') && !empty($request->vehicle_id)) {
+                $query->where('vehicle_id', $request->vehicle_id);
+            }
+
+            // Filtro por estado
+            if ($request->has('estado')) {
+                $query->where('estado', $request->boolean('estado'));
+            }
+
+            $cajas = $query->orderBy('created_at', 'desc')->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $cajas,
+                'count' => $cajas->count()
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error en index de OperatingBox: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener las cajas operativas: ' . $e->getMessage()
+            ], 500);
         }
-
-        // Filtro por vehículo
-        if ($request->has('vehicle_id') && !empty($request->vehicle_id)) {
-            $query->where('vehicle_id', $request->vehicle_id);
-        }
-
-        // Filtro por estado
-        if ($request->has('estado')) {
-            $query->where('estado', $request->boolean('estado'));
-        }
-
-        $cajas = $query->orderBy('created_at', 'desc')->get();
-
-        return response()->json([
-            'success' => true,
-            'data' => $cajas
-        ], 200);
     }
 
     /**
@@ -47,29 +57,57 @@ class OperatingBoxController extends Controller
      */
     public function getVehiclesByBusiness(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'negocio_id' => 'required|exists:businesses,id'
-        ]);
+        try {
+            $validator = Validator::make($request->all(), [
+                'negocio_id' => 'required|integer|exists:businesses,id'
+            ]);
 
-        if ($validator->fails()) {
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Log para debug
+            Log::info('Buscando vehículos para negocio_id: ' . $request->negocio_id);
+
+            // Obtener vehículos del negocio especificado
+            $vehicles = Vehicle::where('negocio_id', $request->negocio_id)
+                ->where('estado', 1)
+                ->select('id', 'numero_placa', 'modelo', 'marca', 'negocio_id')
+                ->orderBy('numero_placa', 'asc')
+                ->get();
+
+            // Log del resultado
+            Log::info('Vehículos encontrados: ' . $vehicles->count());
+
+            // Formatear los vehículos para el frontend
+            $vehiclesFormatted = $vehicles->map(function ($vehicle) {
+                return [
+                    'id' => $vehicle->id,
+                    'numero_placa' => $vehicle->numero_placa,
+                    'modelo' => $vehicle->modelo,
+                    'marca' => $vehicle->marca,
+                    'negocio_id' => $vehicle->negocio_id,
+                    'display_name' => $vehicle->numero_placa . ' - ' . $vehicle->marca . ' ' . $vehicle->modelo
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $vehiclesFormatted,
+                'count' => $vehiclesFormatted->count()
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error en getVehiclesByBusiness: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
-            ], 422);
+                'message' => 'Error al obtener los vehículos: ' . $e->getMessage(),
+                'data' => [],
+                'count' => 0
+            ], 500);
         }
-
-        // Obtener vehículos del negocio especificado
-        $vehicles = Vehicle::where('negocio_id', $request->negocio_id)
-            ->where('estado', true)
-            ->select('id', 'numero_placa', 'modelo', 'marca', 'año', 'negocio_id')
-            ->orderBy('numero_placa', 'asc')
-            ->get();
-
-        return response()->json([
-            'success' => true,
-            'data' => $vehicles,
-            'count' => $vehicles->count()
-        ], 200);
     }
 
     /**
@@ -113,9 +151,9 @@ class OperatingBoxController extends Controller
             $caja = OperatingBox::create([
                 'negocio_id' => $request->negocio_id,
                 'vehicle_id' => $request->vehicle_id,
-                'nombre' => $request->nombre,
+                'nombre' => strtoupper($request->nombre),
                 'saldo' => $request->saldo,
-                'descripcion' => $request->descripcion ?? null,
+                'descripcion' => $request->descripcion ? strtoupper($request->descripcion) : null,
                 'estado' => $request->boolean('estado', true),
             ]);
 
@@ -126,7 +164,7 @@ class OperatingBoxController extends Controller
                 'monto' => $request->saldo,
                 'saldo_anterior' => 0,
                 'saldo_nuevo' => $request->saldo,
-                'descripcion' => 'Apertura de caja operativa',
+                'descripcion' => 'APERTURA DE CAJA OPERATIVA',
                 'fecha_movimiento' => now(),
             ]);
 
@@ -142,6 +180,7 @@ class OperatingBoxController extends Controller
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
+            Log::error('Error al crear caja operativa: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Error al crear la caja operativa: ' . $e->getMessage()
@@ -154,31 +193,39 @@ class OperatingBoxController extends Controller
      */
     public function show($id)
     {
-        $caja = OperatingBox::with(['negocio', 'vehicle'])->find($id);
+        try {
+            $caja = OperatingBox::with(['negocio', 'vehicle'])->find($id);
 
-        if (!$caja) {
+            if (!$caja) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Caja operativa no encontrada.'
+                ], 404);
+            }
+
+            // Obtener estadísticas de la caja
+            $estadisticas = [
+                'total_ingresos' => OperatingBoxHistorie::where('operating_box_id', $id)
+                    ->whereIn('tipo_movimiento', ['ingreso', 'ajuste_ingreso', 'apertura'])
+                    ->sum('monto'),
+                'total_egresos' => OperatingBoxHistorie::where('operating_box_id', $id)
+                    ->whereIn('tipo_movimiento', ['egreso', 'ajuste_egreso'])
+                    ->sum('monto'),
+                'cantidad_movimientos' => OperatingBoxHistorie::where('operating_box_id', $id)->count(),
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data' => $caja,
+                'estadisticas' => $estadisticas
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error en show de OperatingBox: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
-                'message' => 'Caja operativa no encontrada.'
-            ], 404);
+                'message' => 'Error al obtener la caja operativa: ' . $e->getMessage()
+            ], 500);
         }
-
-        // Obtener estadísticas de la caja
-        $estadisticas = [
-            'total_ingresos' => OperatingBoxHistorie::where('operating_box_id', $id)
-                ->where('tipo_movimiento', 'ingreso')
-                ->sum('monto'),
-            'total_egresos' => OperatingBoxHistorie::where('operating_box_id', $id)
-                ->where('tipo_movimiento', 'egreso')
-                ->sum('monto'),
-            'cantidad_movimientos' => OperatingBoxHistorie::where('operating_box_id', $id)->count(),
-        ];
-
-        return response()->json([
-            'success' => true,
-            'data' => $caja,
-            'estadisticas' => $estadisticas
-        ], 200);
     }
 
     /**
@@ -235,9 +282,9 @@ class OperatingBoxController extends Controller
             $caja->update([
                 'negocio_id' => $request->negocio_id,
                 'vehicle_id' => $request->vehicle_id,
-                'nombre' => $request->nombre,
+                'nombre' => strtoupper($request->nombre),
                 'saldo' => $nuevoSaldo,
-                'descripcion' => $request->descripcion ?? null,
+                'descripcion' => $request->descripcion ? strtoupper($request->descripcion) : null,
                 'estado' => $request->boolean('estado', $caja->estado),
             ]);
 
@@ -252,7 +299,7 @@ class OperatingBoxController extends Controller
                     'monto' => abs($diferencia),
                     'saldo_anterior' => $saldoAnterior,
                     'saldo_nuevo' => $nuevoSaldo,
-                    'descripcion' => 'Ajuste manual de saldo',
+                    'descripcion' => 'AJUSTE MANUAL DE SALDO',
                     'fecha_movimiento' => now(),
                 ]);
             }
@@ -269,6 +316,7 @@ class OperatingBoxController extends Controller
             ], 200);
         } catch (\Exception $e) {
             DB::rollBack();
+            Log::error('Error al actualizar caja operativa: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Error al actualizar la caja operativa: ' . $e->getMessage()
@@ -278,7 +326,6 @@ class OperatingBoxController extends Controller
 
     /**
      * Eliminar (o desactivar) una caja operativa
-     * Nota: No eliminamos físicamente, solo desactivamos
      */
     public function destroy($id)
     {
@@ -291,13 +338,20 @@ class OperatingBoxController extends Controller
             ], 404);
         }
 
-        // Cambiamos estado a false (soft delete lógico)
-        $caja->update(['estado' => false]);
+        try {
+            $caja->update(['estado' => false]);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Caja operativa desactivada exitosamente.'
-        ], 200);
+            return response()->json([
+                'success' => true,
+                'message' => 'Caja operativa desactivada exitosamente.'
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error al desactivar caja operativa: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al desactivar la caja operativa: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
@@ -321,12 +375,20 @@ class OperatingBoxController extends Controller
             ], 400);
         }
 
-        $caja->update(['estado' => true]);
+        try {
+            $caja->update(['estado' => true]);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Caja operativa reactivada exitosamente.'
-        ], 200);
+            return response()->json([
+                'success' => true,
+                'message' => 'Caja operativa reactivada exitosamente.'
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error al reactivar caja operativa: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al reactivar la caja operativa: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
@@ -344,19 +406,23 @@ class OperatingBoxController extends Controller
         }
 
         try {
-            DB::transaction(function () use ($caja) {
-                // Eliminamos todos los registros de historial asociados a esta caja
-                OperatingBoxHistorie::where('operating_box_id', $caja->id)->delete();
+            DB::beginTransaction();
 
-                // Eliminamos permanentemente la caja
-                $caja->delete();
-            });
+            // Eliminamos todos los registros de historial asociados a esta caja
+            OperatingBoxHistorie::where('operating_box_id', $caja->id)->delete();
+
+            // Eliminamos permanentemente la caja
+            $caja->delete();
+
+            DB::commit();
 
             return response()->json([
                 'success' => true,
                 'message' => 'Caja operativa y sus historiales eliminados permanentemente.'
             ], 200);
         } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error al eliminar permanentemente caja operativa: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Error al eliminar permanentemente la caja operativa: ' . $e->getMessage()
@@ -365,30 +431,38 @@ class OperatingBoxController extends Controller
     }
 
     /**
-     * Listar solo las cajas operativas activas (estado = true)
+     * Listar solo las cajas operativas activas
      */
     public function boxActives(Request $request)
     {
-        $query = OperatingBox::with(['negocio', 'vehicle'])
-            ->where('estado', true);
+        try {
+            $query = OperatingBox::with(['negocio', 'vehicle'])
+                ->where('estado', true);
 
-        // Filtro por negocio
-        if ($request->has('negocio_id') && !empty($request->negocio_id)) {
-            $query->where('negocio_id', $request->negocio_id);
+            // Filtro por negocio
+            if ($request->has('negocio_id') && !empty($request->negocio_id)) {
+                $query->where('negocio_id', $request->negocio_id);
+            }
+
+            // Filtro por vehículo
+            if ($request->has('vehicle_id') && !empty($request->vehicle_id)) {
+                $query->where('vehicle_id', $request->vehicle_id);
+            }
+
+            $cajas = $query->orderBy('created_at', 'desc')->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $cajas,
+                'count' => $cajas->count()
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error en boxActives: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener las cajas activas: ' . $e->getMessage()
+            ], 500);
         }
-
-        // Filtro por vehículo
-        if ($request->has('vehicle_id') && !empty($request->vehicle_id)) {
-            $query->where('vehicle_id', $request->vehicle_id);
-        }
-
-        $cajas = $query->orderBy('created_at', 'desc')->get();
-
-        return response()->json([
-            'success' => true,
-            'data' => $cajas,
-            'count' => $cajas->count()
-        ], 200);
     }
 
     /**
@@ -396,46 +470,53 @@ class OperatingBoxController extends Controller
      */
     public function summaryByBusiness(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'negocio_id' => 'required|exists:businesses,id'
-        ]);
+        try {
+            $validator = Validator::make($request->all(), [
+                'negocio_id' => 'required|exists:businesses,id'
+            ]);
 
-        if ($validator->fails()) {
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $cajas = OperatingBox::with(['vehicle'])
+                ->where('negocio_id', $request->negocio_id)
+                ->where('estado', true)
+                ->get();
+
+            $resumen = [
+                'total_cajas' => $cajas->count(),
+                'saldo_total' => $cajas->sum('saldo'),
+                'cajas_con_vehiculo' => $cajas->whereNotNull('vehicle_id')->count(),
+                'cajas_sin_vehiculo' => $cajas->whereNull('vehicle_id')->count(),
+                'detalle' => $cajas->map(function ($caja) {
+                    return [
+                        'id' => $caja->id,
+                        'nombre' => $caja->nombre,
+                        'saldo' => $caja->saldo,
+                        'vehiculo' => $caja->vehicle ? [
+                            'id' => $caja->vehicle->id,
+                            'placa' => $caja->vehicle->numero_placa,
+                            'modelo' => $caja->vehicle->modelo,
+                        ] : null
+                    ];
+                })
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data' => $resumen
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error en summaryByBusiness: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
-            ], 422);
+                'message' => 'Error al obtener el resumen: ' . $e->getMessage()
+            ], 500);
         }
-
-        $cajas = OperatingBox::with(['vehicle'])
-            ->where('negocio_id', $request->negocio_id)
-            ->where('estado', true)
-            ->get();
-
-        $resumen = [
-            'total_cajas' => $cajas->count(),
-            'saldo_total' => $cajas->sum('saldo'),
-            'cajas_con_vehiculo' => $cajas->whereNotNull('vehicle_id')->count(),
-            'cajas_sin_vehiculo' => $cajas->whereNull('vehicle_id')->count(),
-            'detalle' => $cajas->map(function ($caja) {
-                return [
-                    'id' => $caja->id,
-                    'nombre' => $caja->nombre,
-                    'saldo' => $caja->saldo,
-                    'vehiculo' => $caja->vehicle ? [
-                        'id' => $caja->vehicle->id,
-                        'placa' => $caja->vehicle->numero_placa,
-                        'modelo' => $caja->vehicle->modelo,
-                        'año' => $caja->vehicle->año,
-                    ] : null
-                ];
-            })
-        ];
-
-        return response()->json([
-            'success' => true,
-            'data' => $resumen
-        ], 200);
     }
 
     /**
@@ -443,36 +524,44 @@ class OperatingBoxController extends Controller
      */
     public function checkVehicleBox(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'vehicle_id' => 'required|exists:vehicles,id',
-            'exclude_box_id' => 'nullable|exists:operating_boxes,id'
-        ]);
+        try {
+            $validator = Validator::make($request->all(), [
+                'vehicle_id' => 'required|exists:vehicles,id',
+                'exclude_box_id' => 'nullable|exists:operating_boxes,id'
+            ]);
 
-        if ($validator->fails()) {
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $query = OperatingBox::where('vehicle_id', $request->vehicle_id)
+                ->where('estado', true);
+
+            // Excluir una caja específica (útil para edición)
+            if ($request->has('exclude_box_id')) {
+                $query->where('id', '!=', $request->exclude_box_id);
+            }
+
+            $cajaExistente = $query->first();
+
+            return response()->json([
+                'success' => true,
+                'tiene_caja' => $cajaExistente ? true : false,
+                'caja' => $cajaExistente ? [
+                    'id' => $cajaExistente->id,
+                    'nombre' => $cajaExistente->nombre,
+                    'saldo' => $cajaExistente->saldo,
+                ] : null
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error en checkVehicleBox: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
-            ], 422);
+                'message' => 'Error al validar el vehículo: ' . $e->getMessage()
+            ], 500);
         }
-
-        $query = OperatingBox::where('vehicle_id', $request->vehicle_id)
-            ->where('estado', true);
-
-        // Excluir una caja específica (útil para edición)
-        if ($request->has('exclude_box_id')) {
-            $query->where('id', '!=', $request->exclude_box_id);
-        }
-
-        $cajaExistente = $query->first();
-
-        return response()->json([
-            'success' => true,
-            'tiene_caja' => $cajaExistente ? true : false,
-            'caja' => $cajaExistente ? [
-                'id' => $cajaExistente->id,
-                'nombre' => $cajaExistente->nombre,
-                'saldo' => $cajaExistente->saldo,
-            ] : null
-        ], 200);
     }
 }
