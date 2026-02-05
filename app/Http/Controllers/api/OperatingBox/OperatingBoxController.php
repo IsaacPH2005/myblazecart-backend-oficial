@@ -61,7 +61,7 @@ class OperatingBoxController extends Controller
         // Obtener vehículos del negocio especificado
         $vehicles = Vehicle::where('negocio_id', $request->negocio_id)
             ->where('estado', true)
-            ->select('id', 'numero_placa', 'modelo', 'marca', 'ano', 'negocio_id')
+            ->select('id', 'numero_placa', 'modelo', 'marca', 'año', 'negocio_id')
             ->orderBy('numero_placa', 'asc')
             ->get();
 
@@ -426,6 +426,7 @@ class OperatingBoxController extends Controller
                         'id' => $caja->vehicle->id,
                         'placa' => $caja->vehicle->numero_placa,
                         'modelo' => $caja->vehicle->modelo,
+                        'año' => $caja->vehicle->año,
                     ] : null
                 ];
             })

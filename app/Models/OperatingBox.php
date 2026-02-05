@@ -4,63 +4,95 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class OperatingBox extends Model
+class Vehicle extends Model
 {
-    protected $table = 'operating_boxes';
-
     protected $fillable = [
-        'nombre',
-        'saldo',
+        'user_id',
         'negocio_id',
-        'vehicle_id', // ✅ AGREGAR
-        'descripcion',
+        'numero_vin',
+        'codigo_unico',
+        'marca',
+        'modelo',
+        'año',
+        'numero_placa',
+        'numero_dot',
+        'tipo_vehiculo',
+        'tipo_propiedad',
+        'precio_compra',
+        'fecha_compra',
+        'valor_actual',
+        'millaje',
+        'vencimiento_registro',
+        'vencimiento_inspeccion',
+        'color',
+        'combustible',
+        'transmision',
+        'capacidad_carga',
         'estado',
+        'observaciones',
+        'foto'
     ];
+
     protected $casts = [
+        'precio_compra' => 'decimal:2',
+        'valor_actual' => 'decimal:2',
+        'millaje' => 'decimal:2',
+        'capacidad_carga' => 'decimal:2',
         'estado' => 'boolean',
-        'saldo' => 'decimal:2',
+        'fecha_compra' => 'date',
+        'vencimiento_registro' => 'date',
+        'vencimiento_inspeccion' => 'date',
     ];
 
-    // ✅ NUEVA RELACIÓN con vehículo
-    public function vehicle()
+    /**
+     * Inversiones asociadas al vehículo
+     */
+    public function investments()
     {
-        return $this->belongsTo(Vehicle::class, 'vehicle_id');
-    }
-    // Relación con FinancialTransaction
-    public function transaccionesFinancieras()
-    {
-        return $this->hasMany(FinancialTransactions::class, 'caja_operativa_id');
+        return $this->hasMany(Investment::class);
     }
 
-    // Relación con Business (Negocio)
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+
     public function negocio()
     {
         return $this->belongsTo(Business::class, 'negocio_id');
     }
-    // Una caja operativa tiene muchos registros de historial
-    public function historial()
+
+    public function documents()
     {
-        return $this->hasMany(OperatingBoxHistorie::class, 'operating_box_id')->orderBy('created_at', 'desc');
+        return $this->hasMany(VehicleDocument::class);
     }
 
-
-    // Métodos para obtener estadísticas
-    public function getTotalIngresosAttribute()
+    public function maintenances()
     {
-        return $this->historial()
-            ->where('tipo_movimiento', 'ingreso')
-            ->sum('monto');
+        return $this->hasMany(VehicleMaintenance::class);
     }
 
-    public function getTotalEgresosAttribute()
+    /**
+     * Relación con cajas operativas
+     */
+    public function operatingBoxes()
     {
-        return abs($this->historial()
-            ->where('tipo_movimiento', 'egreso')
-            ->sum('monto'));
+        return $this->hasMany(OperatingBox::class, 'vehicle_id');
     }
 
-    public function getUltimoMovimientoAttribute()
+    /**
+     * Scope para vehículos activos
+     */
+    public function scopeActive($query)
     {
-        return $this->historial()->first();
+        return $query->where('estado', true);
+    }
+
+    /**
+     * Scope para filtrar por negocio
+     */
+    public function scopeByBusiness($query, $negocioId)
+    {
+        return $query->where('negocio_id', $negocioId);
     }
 }
