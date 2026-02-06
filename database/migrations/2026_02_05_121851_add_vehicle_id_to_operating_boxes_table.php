@@ -12,20 +12,14 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('operating_boxes', function (Blueprint $table) {
-            // Primero verifica si la columna ya existe
+            // Verificar si la columna ya existe antes de agregarla
             if (!Schema::hasColumn('operating_boxes', 'vehicle_id')) {
                 $table->unsignedBigInteger('vehicle_id')
                     ->nullable()
                     ->after('negocio_id');
 
-                // Luego crea la foreign key solo si la tabla vehicles existe
-                if (Schema::hasTable('vehicles')) {
-                    $table->foreign('vehicle_id')
-                        ->references('id')
-                        ->on('vehicles')
-                        ->onDelete('set null')  // ⚠️ Cambiado a SET NULL para no perder cajas
-                        ->onUpdate('cascade');
-                }
+                // Agregar índice para mejorar performance
+                $table->index('vehicle_id');
             }
         });
     }
@@ -37,9 +31,7 @@ return new class extends Migration
     {
         Schema::table('operating_boxes', function (Blueprint $table) {
             if (Schema::hasColumn('operating_boxes', 'vehicle_id')) {
-                // Eliminar foreign key primero
-                $table->dropForeign(['vehicle_id']);
-                // Luego eliminar la columna
+                $table->dropIndex(['vehicle_id']);
                 $table->dropColumn('vehicle_id');
             }
         });
