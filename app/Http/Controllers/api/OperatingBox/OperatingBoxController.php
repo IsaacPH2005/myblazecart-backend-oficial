@@ -69,19 +69,12 @@ class OperatingBoxController extends Controller
                 ], 422);
             }
 
-            // Log para debug
-            Log::info('Buscando vehículos para negocio_id: ' . $request->negocio_id);
-
             // Obtener vehículos del negocio especificado
             $vehicles = Vehicle::where('negocio_id', $request->negocio_id)
                 ->where('estado', 1)
                 ->select('id', 'numero_placa', 'modelo', 'marca', 'negocio_id', 'codigo_unico')
                 ->orderBy('numero_placa', 'asc')
                 ->get();
-
-            // Log del resultado
-            Log::info('Vehículos encontrados: ' . $vehicles->count());
-
             // Formatear los vehículos para el frontend
             $vehiclesFormatted = $vehicles->map(function ($vehicle) {
                 return [
@@ -101,7 +94,6 @@ class OperatingBoxController extends Controller
                 'count' => $vehiclesFormatted->count()
             ], 200);
         } catch (\Exception $e) {
-            Log::error('Error en getVehiclesByBusiness: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Error al obtener los vehículos: ' . $e->getMessage(),

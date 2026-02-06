@@ -12,12 +12,21 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('operating_boxes', function (Blueprint $table) {
-            $table->foreignId('vehicle_id')
-                ->nullable()
-                ->after('negocio_id')
-                ->constrained('vehicles')
-                ->onDelete('cascade')
-                ->onUpdate('cascade');
+            // Primero verifica si la columna ya existe
+            if (!Schema::hasColumn('operating_boxes', 'vehicle_id')) {
+                $table->unsignedBigInteger('vehicle_id')
+                    ->nullable()
+                    ->after('negocio_id');
+
+                // Luego crea la foreign key solo si la tabla vehicles existe
+                if (Schema::hasTable('vehicles')) {
+                    $table->foreign('vehicle_id')
+                        ->references('id')
+                        ->on('vehicles')
+                        ->onDelete('set null')  // ⚠️ Cambiado a SET NULL para no perder cajas
+                        ->onUpdate('cascade');
+                }
+            }
         });
     }
 
@@ -27,8 +36,12 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('operating_boxes', function (Blueprint $table) {
-            $table->dropForeign(['vehicle_id']);
-            $table->dropColumn('vehicle_id');
+            if (Schema::hasColumn('operating_boxes', 'vehicle_id')) {
+                // Eliminar foreign key primero
+                $table->dropForeign(['vehicle_id']);
+                // Luego eliminar la columna
+                $table->dropColumn('vehicle_id');
+            }
         });
     }
 };
