@@ -51,7 +51,6 @@ class OperatingBoxController extends Controller
             ], 500);
         }
     }
-
     public function getVehiclesByBusiness(Request $request)
     {
         try {
@@ -75,15 +74,15 @@ class OperatingBoxController extends Controller
             // Contar todos los vehículos del negocio
             $totalVehicles = Vehicle::where('negocio_id', $negocioId)->count();
 
-            // Contar vehículos activos (usar 'estado' en lugar de 'is_active')
+            // Contar vehículos activos
             $activeVehicles = Vehicle::where('negocio_id', $negocioId)
-                ->where('estado', true) // ← CORREGIDO
+                ->where('is_active', true)
                 ->count();
 
             // Obtener vehículos activos
             $vehicles = Vehicle::where('negocio_id', $negocioId)
-                ->where('estado', true) // ← CORREGIDO
-                ->select('id', 'codigo_unico', 'numero_placa', 'numero_vin', 'marca', 'modelo', 'año', 'color', 'tipo_vehiculo', 'tipo_propiedad', 'user_id', 'valor_actual', 'precio_compra', 'millaje', 'estado')
+                ->where('is_active', true) // ← CAMBIADO A is_active
+                ->select('id', 'codigo_unico', 'numero_placa', 'numero_vin', 'marca', 'modelo', 'año', 'color', 'tipo_vehiculo', 'tipo_propiedad', 'user_id', 'valor_actual', 'precio_compra', 'millaje', 'is_active', 'negocio_id')
                 ->orderBy('tipo_propiedad')
                 ->orderBy('codigo_unico')
                 ->get();
@@ -108,7 +107,7 @@ class OperatingBoxController extends Controller
                         'negocio_id' => $negocioId,
                         'total_vehiculos_db' => $totalVehicles,
                         'vehiculos_activos' => $activeVehicles,
-                        'vehiculos_inactivos' => $allVehicles->where('estado', false)->count(),
+                        'vehiculos_inactivos' => $allVehicles->where('is_active', false)->count(),
                         'codigos_disponibles' => $allVehicles->pluck('codigo_unico')->toArray()
                     ]
                 ], 200);
@@ -131,7 +130,8 @@ class OperatingBoxController extends Controller
                     'valor_actual' => floatval($vehicle->valor_actual ?? 0),
                     'precio_compra' => floatval($vehicle->precio_compra ?? 0),
                     'millaje' => intval($vehicle->millaje ?? 0),
-                    'estado' => $vehicle->estado,
+                    'is_active' => $vehicle->is_active, // ← CAMBIADO
+                    'estado' => $vehicle->is_active, // ← Para compatibilidad con el frontend
                     'display_name' => trim("{$vehicle->numero_placa} - {$vehicle->marca} {$vehicle->modelo}"),
                     'nombre_completo' => trim("{$vehicle->codigo_unico} - {$vehicle->numero_placa} ({$vehicle->marca} {$vehicle->modelo})")
                 ];
@@ -159,6 +159,7 @@ class OperatingBoxController extends Controller
             ], 500);
         }
     }
+
 
 
     /**
