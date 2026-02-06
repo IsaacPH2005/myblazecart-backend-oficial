@@ -52,56 +52,114 @@ class OperatingBoxController extends Controller
         }
     }
 
-    /**
-     * Obtener vehículos filtrados por negocio
-     */
     public function getVehiclesByBusiness(Request $request)
     {
         try {
             $validator = Validator::make($request->all(), [
-                'negocio_id' => 'required|integer|exists:businesses,id'
+                'negocio_id' => 'required|exists:businesses,id',
+            ], [
+                'negocio_id.required' => 'El ID del negocio es obligatorio',
+                'negocio_id.exists' => 'El negocio seleccionado no existe',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
+                    'message' => 'Parámetros inválidos',
                     'errors' => $validator->errors()
                 ], 422);
             }
 
-            // Obtener vehículos del negocio especificado
-            $vehicles = Vehicle::where('negocio_id', $request->negocio_id)
-                ->where('estado', 1)
-                ->select('id', 'numero_placa', 'modelo', 'marca', 'negocio_id', 'codigo_unico')
-                ->orderBy('numero_placa', 'asc')
+            $negocioId = $request->input('negocio_id');
+
+            // Contar todos los vehículos del negocio
+            $totalVehicles = Vehicle::where('negocio_id', $negocioId)->count();
+
+            // Contar vehículos activos (usar 'estado' en lugar de 'is_active')
+            $activeVehicles = Vehicle::where('negocio_id', $negocioId)
+                ->where('estado', true) // ← CORREGIDO
+                ->count();
+
+            // Obtener vehículos activos
+            $vehicles = Vehicle::where('negocio_id', $negocioId)
+                ->where('estado', true) // ← CORREGIDO
+                ->select('id', 'codigo_unico', 'numero_placa', 'numero_vin', 'marca', 'modelo', 'año', 'color', 'tipo_vehiculo', 'tipo_propiedad', 'user_id', 'valor_actual', 'precio_compra', 'millaje', 'estado')
+                ->orderBy('tipo_propiedad')
+                ->orderBy('codigo_unico')
                 ->get();
-            // Formatear los vehículos para el frontend
-            $vehiclesFormatted = $vehicles->map(function ($vehicle) {
+
+            Log::info('🔍 Búsqueda de vehículos', [
+                'negocio_id' => $negocioId,
+                'total_en_db' => $totalVehicles,
+                'activos' => $activeVehicles,
+                'encontrados' => $vehicles->count()
+            ]);
+
+            if ($vehicles->isEmpty()) {
+                // Ver todos los vehículos del negocio (activos e inactivos)
+                $allVehicles = Vehicle::where('negocio_id', $negocioId)->get();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'No hay vehículos activos para este negocio',
+                    'data' => [],
+                    'count' => 0,
+                    'debug' => [
+                        'negocio_id' => $negocioId,
+                        'total_vehiculos_db' => $totalVehicles,
+                        'vehiculos_activos' => $activeVehicles,
+                        'vehiculos_inactivos' => $allVehicles->where('estado', false)->count(),
+                        'codigos_disponibles' => $allVehicles->pluck('codigo_unico')->toArray()
+                    ]
+                ], 200);
+            }
+
+            // Formatear vehículos
+            $vehiculosData = $vehicles->map(function ($vehicle) {
                 return [
                     'id' => $vehicle->id,
+                    'codigo_unico' => $vehicle->codigo_unico,
                     'numero_placa' => $vehicle->numero_placa,
-                    'modelo' => $vehicle->modelo,
+                    'numero_vin' => $vehicle->numero_vin,
                     'marca' => $vehicle->marca,
+                    'modelo' => $vehicle->modelo,
+                    'año' => $vehicle->año,
+                    'color' => $vehicle->color,
+                    'tipo_vehiculo' => $vehicle->tipo_vehiculo,
+                    'tipo_propiedad' => strtoupper($vehicle->tipo_propiedad ?? 'PROPIO'),
                     'negocio_id' => $vehicle->negocio_id,
-                    'display_name' => $vehicle->numero_placa . ' - ' . $vehicle->marca . ' ' . $vehicle->modelo,
-                    'codigo_unico' => $vehicle->codigo_unico
+                    'valor_actual' => floatval($vehicle->valor_actual ?? 0),
+                    'precio_compra' => floatval($vehicle->precio_compra ?? 0),
+                    'millaje' => intval($vehicle->millaje ?? 0),
+                    'estado' => $vehicle->estado,
+                    'display_name' => trim("{$vehicle->numero_placa} - {$vehicle->marca} {$vehicle->modelo}"),
+                    'nombre_completo' => trim("{$vehicle->codigo_unico} - {$vehicle->numero_placa} ({$vehicle->marca} {$vehicle->modelo})")
                 ];
             });
 
             return response()->json([
                 'success' => true,
-                'data' => $vehiclesFormatted,
-                'count' => $vehiclesFormatted->count()
+                'message' => 'Vehículos obtenidos correctamente',
+                'data' => $vehiculosData->values()->toArray(),
+                'count' => $vehiculosData->count()
             ], 200);
         } catch (\Exception $e) {
+            Log::error('❌ Error en getVehiclesByBusiness', [
+                'message' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => $e->getFile()
+            ]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Error al obtener los vehículos: ' . $e->getMessage(),
+                'message' => 'Error al obtener los vehículos',
+                'error' => $e->getMessage(),
                 'data' => [],
                 'count' => 0
             ], 500);
         }
     }
+
 
     /**
      * Crear una nueva caja operativa
