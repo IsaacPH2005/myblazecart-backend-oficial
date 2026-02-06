@@ -35,7 +35,7 @@ class EstadosDeResultadoInvestorLeaseOn extends Controller
             // Obtener inversiones activas del usuario
             $inversiones = Investment::where('user_id', $user->id)
                 ->where('active', true)
-                ->with(['business:id,nombre,descripcion,active'])
+                ->with(['business:id,nombre,descripcion,estado'])
                 ->get();
 
             if ($inversiones->isEmpty()) {
@@ -62,8 +62,8 @@ class EstadosDeResultadoInvestorLeaseOn extends Controller
                     'id' => $negocio->id,
                     'nombre' => strtoupper($negocio->nombre),
                     'descripcion' => $negocio->descripcion ?? 'Sin descripción',
-                    'active' => boolval($negocio->active),
-                    'estado_display' => $negocio->active ? 'Activo' : 'Inactivo',
+                    'estado' => boolval($negocio->estado),
+                    'estado_display' => $negocio->estado ? 'Activo' : 'Inactivo',
                     'inversion' => [
                         'total_invertido' => floatval($totalInvertido),
                         'total_invertido_formateado' => number_format($totalInvertido, 2, '.', ','),
@@ -258,7 +258,7 @@ class EstadosDeResultadoInvestorLeaseOn extends Controller
             $negocio = Business::findOrFail($negocioId);
 
             // Verificar que el negocio esté activo
-            if (!$negocio->active) {
+            if (!$negocio->estado) {
                 return response()->json([
                     'status' => 'error',
                     'message' => 'El negocio no está activo'
@@ -446,7 +446,7 @@ class EstadosDeResultadoInvestorLeaseOn extends Controller
                 'negocio' => [
                     'id' => $negocioId,
                     'nombre' => strtoupper($negocio->nombre),
-                    'active' => boolval($negocio->active),
+                    'estado' => boolval($negocio->estado),
                 ],
                 'periodo' => [
                     'fecha_inicial' => $fechaInicial,
@@ -521,7 +521,7 @@ class EstadosDeResultadoInvestorLeaseOn extends Controller
 
             $inversiones = Investment::where('user_id', $user->id)
                 ->where('active', true)
-                ->with(['business:id,nombre,active', 'vehicle:id,codigo_unico,numero_placa,marca,modelo,is_active'])
+                ->with(['business:id,nombre,estado', 'vehicle:id,codigo_unico,numero_placa,marca,modelo,is_active'])
                 ->get();
 
             if ($inversiones->isEmpty()) {
@@ -553,7 +553,7 @@ class EstadosDeResultadoInvestorLeaseOn extends Controller
                     'negocio' => [
                         'id' => $inversion->business->id,
                         'nombre' => strtoupper($inversion->business->nombre),
-                        'active' => boolval($inversion->business->active),
+                        'estado' => boolval($inversion->business->estado),
                     ],
                     'vehiculo' => $inversion->vehicle ? [
                         'id' => $inversion->vehicle->id,
