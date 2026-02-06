@@ -18,7 +18,7 @@ class InvestorMiddleware
      */
     public function handle(Request $request, Closure $next)
     {
-        if (!$request->user() || !$request->user()->hasRole('inversionista')) {
+        if (!$request->user() || !$request->user()->hasRole('INVERSIONISTA')) {
             return new JsonResponse([
                 'success' => false,
                 'message' => 'No tienes permisos de transportista para acceder a este recurso.'

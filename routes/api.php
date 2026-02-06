@@ -8,6 +8,7 @@ use App\Http\Controllers\api\Driver\DriverDocumentController;
 use App\Http\Controllers\api\investments\InvestmentController;
 use App\Http\Controllers\api\investments\InvestorDashboardController;
 use App\Http\Controllers\api\investments\VehicleFinancialController;
+use App\Http\Controllers\api\InvestorLeaseOn\EstadosDeResultadoInvestorLeaseOn;
 use App\Http\Controllers\api\MovementBox\MovementBoxController;
 use App\Http\Controllers\api\OperatingBox\OperatingBoxController;
 use App\Http\Controllers\api\OperatingBox\OperatingBoxHistoryController;
@@ -436,7 +437,20 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/vehicles-financial/export/excel', [VehicleFinancialController::class, 'exportToExcel']);
         Route::get('/vehicles-financial/export/pdf', [VehicleFinancialController::class, 'exportToPDF']);
     });
+    // Rutas protegidas con middleware personalizado
+    Route::middleware(['auth:sanctum', 'inversionista-lease-on'])->prefix('investor-lease-on')->group(function () {
+        // Obtener negocios donde ha invertido
+        Route::get('/my-businesses', [EstadosDeResultadoInvestorLeaseOn::class, 'getMyBusinesses']);
 
+        // Obtener vehículos donde ha invertido en un negocio específico
+        Route::get('/my-vehicles-by-business', [EstadosDeResultadoInvestorLeaseOn::class, 'getMyVehiclesByBusiness']);
+
+        // Obtener estado de resultados
+        Route::get('/financial-statement', [EstadosDeResultadoInvestorLeaseOn::class, 'getFinancialStatementByDateRange']);
+
+        // Obtener resumen de inversiones
+        Route::get('/my-investments-summary', [EstadosDeResultadoInvestorLeaseOn::class, 'getMyInvestmentsSummary']);
+    });
     /*
     |--------------------------------------------------------------------------
     | Rutas Comunes (Admin y Carrier)

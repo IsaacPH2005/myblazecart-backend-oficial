@@ -17,7 +17,7 @@ class CarrierMiddleware
      */
     public function handle(Request $request, Closure $next)
     {
-        if (!$request->user() || !$request->user()->hasRole('carrier')) {
+        if (!$request->user() || !$request->user()->hasRole('CARRIER')) {
             return new JsonResponse([
                 'success' => false,
                 'message' => 'No tienes permisos de transportista para acceder a este recurso.'

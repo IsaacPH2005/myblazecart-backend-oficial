@@ -29,6 +29,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin' => \App\Http\Middleware\AdminMiddleware::class,
             'carrier' => \App\Http\Middleware\CarrierMiddleware::class,
             'inversionista' => \App\Http\Middleware\InvestorMiddleware::class,
+            'inversionista-lease-on' => \App\Http\Middleware\InvestorMiddleware::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
