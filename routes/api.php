@@ -321,27 +321,24 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('movements-boxes/{id}', [MovementBoxController::class, 'show']);
 
 
-        // Rutas para Cajas Operativas (Operating Boxes)
+        // Rutas para Operating Box
         Route::prefix('operating-boxes')->group(function () {
-            // ✅ Rutas de listado y consulta
-            Route::get('/', [OperatingBoxController::class, 'index']);
-            Route::get('/actives', [OperatingBoxController::class, 'boxActives']);
+            // IMPORTANTE: Esta ruta debe ir ANTES de las rutas con parámetros {id}
             Route::get('/vehicles-by-business', [OperatingBoxController::class, 'getVehiclesByBusiness']);
+            Route::get('/actives', [OperatingBoxController::class, 'boxActives']);
             Route::get('/summary-by-business', [OperatingBoxController::class, 'summaryByBusiness']);
             Route::get('/check-vehicle-box', [OperatingBoxController::class, 'checkVehicleBox']);
-            Route::get('/{id}', [OperatingBoxController::class, 'show']);
 
-            // ✅ Rutas de creación y actualización
+            // Rutas con parámetros
+            Route::get('/', [OperatingBoxController::class, 'index']);
             Route::post('/', [OperatingBoxController::class, 'store']);
+            Route::get('/{id}', [OperatingBoxController::class, 'show']);
             Route::put('/{id}', [OperatingBoxController::class, 'update']);
-
-            // ✅ Rutas de activación/desactivación
+            Route::delete('/{id}', [OperatingBoxController::class, 'destroy']);
             Route::post('/{id}/activate', [OperatingBoxController::class, 'activate']);
-            Route::delete('/{id}', [OperatingBoxController::class, 'destroy']); // Desactivar (soft delete)
-
-            // ✅ Ruta de eliminación permanente
             Route::delete('/{id}/delete-permanent', [OperatingBoxController::class, 'deletePermanent']);
         });
+
 
         Route::apiResource('categories', CategoryController::class);
         Route::post('/categories-excel/import', [CategoryController::class, 'import']);
