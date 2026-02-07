@@ -12,6 +12,7 @@ use App\Http\Controllers\api\InvestorLeaseOn\DatosRelevantesLeaseOn;
 use App\Http\Controllers\api\InvestorLeaseOn\EgresosPorCategoriaInvestorLeaseOn;
 use App\Http\Controllers\api\InvestorLeaseOn\EstadosDeResultadoInvestorLeaseOn;
 use App\Http\Controllers\api\InvestorLeaseOn\IngresosPorCategoriaInvestorLeaseOn;
+use App\Http\Controllers\api\InvestorLeaseOn\InvestorDashboardLeaseOn;
 use App\Http\Controllers\api\InvestorLeaseOn\VehiculosDelNegocioInvestorLeaseOn;
 use App\Http\Controllers\api\MovementBox\MovementBoxController;
 use App\Http\Controllers\api\OperatingBox\OperatingBoxController;
@@ -496,6 +497,78 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Comparar mis vehículos
         Route::get('/compare-my-vehicles', [DatosRelevantesLeaseOn::class, 'compareMyVehicles']);
+
+
+
+
+        /**
+         * 1. Dashboard principal del inversionista
+         * GET /api/investor-lease-on/dashboard
+         *
+         * Retorna:
+         * - Información del inversionista
+         * - Estadísticas generales (capital, ROI, inversiones)
+         * - Inversiones por negocio
+         * - Top 5 vehículos más rentables
+         * - Actividad reciente
+         */
+        Route::get('/dashboard', [InvestorDashboardLeaseOn::class, 'index']);
+
+        /**
+         * 2. Obtener todas mis inversiones con rendimiento
+         * GET /api/investor-lease-on/my-investments
+         *
+         * Retorna:
+         * - Lista de todas las inversiones
+         * - Rendimiento por inversión (ingresos, egresos, ROI)
+         * - Resumen total
+         */
+        Route::get('/my-investments', [InvestorDashboardLeaseOn::class, 'myInvestments']);
+
+        /**
+         * 3. Obtener detalles de un vehículo específico
+         * GET /api/investor-lease-on/vehicle/{vehicleId}/details
+         *
+         * Parámetros:
+         * - vehicleId: ID del vehículo (en la URL)
+         *
+         * Retorna:
+         * - Información completa del vehículo
+         * - Mi inversión en el vehículo
+         * - Rendimiento detallado
+         * - Transacciones por categoría
+         * - Últimas 15 transacciones
+         */
+        Route::get('/vehicle/{vehicleId}/details', [InvestorDashboardLeaseOn::class, 'vehicleDetails']);
+
+        /**
+         * 4. Obtener historial de rendimiento mensual
+         * GET /api/investor-lease-on/performance-history?fecha_inicio=2025-08-07&fecha_fin=2026-02-07
+         *
+         * Parámetros opcionales:
+         * - fecha_inicio: Fecha inicio (YYYY-MM-DD) - Default: 6 meses atrás
+         * - fecha_fin: Fecha fin (YYYY-MM-DD) - Default: hoy
+         *
+         * Retorna:
+         * - Rendimiento mensual (ingresos, egresos, utilidad por mes)
+         * - ROI por vehículo en el periodo
+         */
+        Route::get('/performance-history', [InvestorDashboardLeaseOn::class, 'performanceHistory']);
+
+        /**
+         * 5. Comparar rendimiento entre mis vehículos
+         * GET /api/investor-lease-on/compare-vehicles?fecha_inicio=2026-02-01&fecha_fin=2026-02-07
+         *
+         * Parámetros opcionales:
+         * - fecha_inicio: Fecha inicio (YYYY-MM-DD) - Default: inicio del mes
+         * - fecha_fin: Fecha fin (YYYY-MM-DD) - Default: hoy
+         *
+         * Retorna:
+         * - Comparativa de todos mis vehículos
+         * - Métricas: ingresos, egresos, ROI, millas, cargas
+         * - Ordenado por ROI descendente
+         */
+        Route::get('/compare-vehicles', [InvestorDashboardLeaseOn::class, 'compareVehicles']);
     });
     /*
     |--------------------------------------------------------------------------
