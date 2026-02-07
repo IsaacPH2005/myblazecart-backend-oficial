@@ -57,8 +57,9 @@ class IngresosPorCategoriaInvestorLeaseOn extends Controller
             $fechaFinal = $request->input('fecha_final');
 
             // ============== VERIFICAR QUE EL USUARIO ES INVERSIONISTA DEL NEGOCIO ==============
-            $inversion = Investment::where('negocio_id', $negocioId)
-                ->where('inversionista_id', $user->id)
+            // ✅ CORREGIDO: Usar business_id y user_id
+            $inversion = Investment::where('business_id', $negocioId)
+                ->where('user_id', $user->id)
                 ->where('estado', 'ACTIVO')
                 ->first();
 
@@ -87,8 +88,9 @@ class IngresosPorCategoriaInvestorLeaseOn extends Controller
                 }
 
                 // Verificar inversión en el vehículo
-                $inversionVehiculo = Investment::where('negocio_id', $negocioId)
-                    ->where('inversionista_id', $user->id)
+                // ✅ CORREGIDO: Usar business_id y user_id
+                $inversionVehiculo = Investment::where('business_id', $negocioId)
+                    ->where('user_id', $user->id)
                     ->where('vehicle_id', $vehicleId)
                     ->where('estado', 'ACTIVO')
                     ->first();
@@ -113,8 +115,9 @@ class IngresosPorCategoriaInvestorLeaseOn extends Controller
                 $query->where('vehicle_id', $vehicleId);
             } else {
                 // Si no hay filtro de vehículo, solo mostrar ingresos de vehículos donde tiene inversión
-                $vehiculosConInversion = Investment::where('negocio_id', $negocioId)
-                    ->where('inversionista_id', $user->id)
+                // ✅ CORREGIDO: Usar business_id y user_id
+                $vehiculosConInversion = Investment::where('business_id', $negocioId)
+                    ->where('user_id', $user->id)
                     ->where('estado', 'ACTIVO')
                     ->whereNotNull('vehicle_id')
                     ->pluck('vehicle_id')
@@ -160,16 +163,17 @@ class IngresosPorCategoriaInvestorLeaseOn extends Controller
             ];
 
             // ============== INFORMACIÓN DE INVERSIÓN ==============
-            $totalInvertido = Investment::where('negocio_id', $negocioId)
-                ->where('inversionista_id', $user->id)
+            // ✅ CORREGIDO: Usar business_id y user_id, y monto_inversion
+            $totalInvertido = Investment::where('business_id', $negocioId)
+                ->where('user_id', $user->id)
                 ->where('estado', 'ACTIVO')
                 ->when($vehicleId, function ($q) use ($vehicleId) {
                     return $q->where('vehicle_id', $vehicleId);
                 })
-                ->sum('monto_invertido');
+                ->sum('monto_inversion');
 
-            $cantidadInversiones = Investment::where('negocio_id', $negocioId)
-                ->where('inversionista_id', $user->id)
+            $cantidadInversiones = Investment::where('business_id', $negocioId)
+                ->where('user_id', $user->id)
                 ->where('estado', 'ACTIVO')
                 ->when($vehicleId, function ($q) use ($vehicleId) {
                     return $q->where('vehicle_id', $vehicleId);
@@ -274,9 +278,9 @@ class IngresosPorCategoriaInvestorLeaseOn extends Controller
             $fechaInicial = $request->input('fecha_inicial');
             $fechaFinal = $request->input('fecha_final');
 
-            // Verificar inversión
-            $inversion = Investment::where('negocio_id', $negocioId)
-                ->where('inversionista_id', $user->id)
+            // Verificar inversión - ✅ CORREGIDO: Usar business_id y user_id
+            $inversion = Investment::where('business_id', $negocioId)
+                ->where('user_id', $user->id)
                 ->where('estado', 'ACTIVO')
                 ->first();
 
@@ -460,8 +464,9 @@ class IngresosPorCategoriaInvestorLeaseOn extends Controller
         if ($vehicleId) {
             $query->where('vehicle_id', $vehicleId);
         } else {
-            $vehiculosConInversion = Investment::where('negocio_id', $negocioId)
-                ->where('inversionista_id', $user->id)
+            // ✅ CORREGIDO: Usar business_id y user_id
+            $vehiculosConInversion = Investment::where('business_id', $negocioId)
+                ->where('user_id', $user->id)
                 ->where('estado', 'ACTIVO')
                 ->whereNotNull('vehicle_id')
                 ->pluck('vehicle_id')
@@ -499,17 +504,17 @@ class IngresosPorCategoriaInvestorLeaseOn extends Controller
             'promedio_ingreso' => $cantidadTransacciones > 0 ? $totalIngresos / $cantidadTransacciones : 0,
         ];
 
-        // Información de inversión
-        $totalInvertido = Investment::where('negocio_id', $negocioId)
-            ->where('inversionista_id', $user->id)
+        // Información de inversión - ✅ CORREGIDO: Usar business_id, user_id y monto_inversion
+        $totalInvertido = Investment::where('business_id', $negocioId)
+            ->where('user_id', $user->id)
             ->where('estado', 'ACTIVO')
             ->when($vehicleId, function ($q) use ($vehicleId) {
                 return $q->where('vehicle_id', $vehicleId);
             })
-            ->sum('monto_invertido');
+            ->sum('monto_inversion');
 
-        $cantidadInversiones = Investment::where('negocio_id', $negocioId)
-            ->where('inversionista_id', $user->id)
+        $cantidadInversiones = Investment::where('business_id', $negocioId)
+            ->where('user_id', $user->id)
             ->where('estado', 'ACTIVO')
             ->when($vehicleId, function ($q) use ($vehicleId) {
                 return $q->where('vehicle_id', $vehicleId);
