@@ -21,13 +21,6 @@ class InvestorDashboardController extends Controller
         try {
             $user = Auth::user();
 
-            if (!$user->hasRole('inversionista')) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tienes permisos para acceder a este dashboard'
-                ], 403);
-            }
-
             $investments = Investment::with(['vehicle', 'business'])
                 ->where('user_id', $user->id)
                 ->orderBy('created_at', 'desc')
@@ -190,14 +183,6 @@ class InvestorDashboardController extends Controller
     {
         try {
             $user = Auth::user();
-
-            if (!$user->hasRole('inversionista')) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tienes permisos para acceder a esta información'
-                ], 403);
-            }
-
             $investments = Investment::with(['vehicle', 'business'])
                 ->where('user_id', $user->id)
                 ->orderBy('created_at', 'desc')
@@ -294,14 +279,6 @@ class InvestorDashboardController extends Controller
     {
         try {
             $user = Auth::user();
-
-            if (!$user->hasRole('inversionista')) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tienes permisos para acceder a esta información'
-                ], 403);
-            }
-
             $investment = Investment::where('user_id', $user->id)
                 ->where('business_id', $businessId)
                 ->first();
@@ -420,13 +397,6 @@ class InvestorDashboardController extends Controller
         try {
             $user = Auth::user();
 
-            if (!$user->hasRole('inversionista')) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tienes permisos para acceder a esta información'
-                ], 403);
-            }
-
             $investment = Investment::where('user_id', $user->id)
                 ->where('business_id', $businessId)
                 ->first();
@@ -482,12 +452,6 @@ class InvestorDashboardController extends Controller
         try {
             $user = Auth::user();
 
-            if (!$user->hasRole('inversionista')) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tienes permisos para acceder a esta información'
-                ], 403);
-            }
 
             // Obtener todas las inversiones del usuario (negocios + vehículos)
             $investments = Investment::with(['business', 'vehicle'])
@@ -631,14 +595,6 @@ class InvestorDashboardController extends Controller
     {
         try {
             $user = Auth::user();
-
-            if (!$user->hasRole('inversionista')) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No tienes permisos para acceder a esta información'
-                ], 403);
-            }
-
             // Verificar que el usuario tenga alguna inversión en este negocio
             $investments = Investment::with(['business', 'vehicle'])
                 ->where('user_id', $user->id)
