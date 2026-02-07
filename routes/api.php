@@ -10,6 +10,7 @@ use App\Http\Controllers\api\investments\InvestorDashboardController;
 use App\Http\Controllers\api\investments\VehicleFinancialController;
 use App\Http\Controllers\api\InvestorLeaseOn\EgresosPorCategoriaInvestorLeaseOn;
 use App\Http\Controllers\api\InvestorLeaseOn\EstadosDeResultadoInvestorLeaseOn;
+use App\Http\Controllers\api\InvestorLeaseOn\IngresosPorCategoriaInvestorLeaseOn;
 use App\Http\Controllers\api\MovementBox\MovementBoxController;
 use App\Http\Controllers\api\OperatingBox\OperatingBoxController;
 use App\Http\Controllers\api\OperatingBox\OperatingBoxHistoryController;
@@ -456,6 +457,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/expenses-by-category', [EgresosPorCategoriaInvestorLeaseOn::class, 'getExpensesByCategoryByBusiness']);
         Route::get('/expenses-excel', [EgresosPorCategoriaInvestorLeaseOn::class, 'exportExpensesToExcel']);
+
+
+        // Obtener ingresos por categoría
+        Route::post('/incomes-by-category', [IngresosPorCategoriaInvestorLeaseOn::class, 'getIncomesByCategoryByBusiness']);
+
+        // Exportar ingresos por categoría a Excel
+        Route::post('/incomes-by-category/export-excel', [IngresosPorCategoriaInvestorLeaseOn::class, 'exportIncomesByCategoryToExcel']);
     });
     /*
     |--------------------------------------------------------------------------
