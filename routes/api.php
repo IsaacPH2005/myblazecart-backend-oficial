@@ -8,6 +8,7 @@ use App\Http\Controllers\api\Driver\DriverDocumentController;
 use App\Http\Controllers\api\investments\InvestmentController;
 use App\Http\Controllers\api\investments\InvestorDashboardController;
 use App\Http\Controllers\api\investments\VehicleFinancialController;
+use App\Http\Controllers\api\InvestorLeaseOn\DatosRelevantesLeaseOn;
 use App\Http\Controllers\api\InvestorLeaseOn\EgresosPorCategoriaInvestorLeaseOn;
 use App\Http\Controllers\api\InvestorLeaseOn\EstadosDeResultadoInvestorLeaseOn;
 use App\Http\Controllers\api\InvestorLeaseOn\IngresosPorCategoriaInvestorLeaseOn;
@@ -481,6 +482,20 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Obtener estado financiero detallado de un vehículo específico
         Route::get('/my-vehicle-detailed-financial-statement', [VehiculosDelNegocioInvestorLeaseOn::class, 'getMyVehicleDetailedFinancialStatement']);
+
+
+
+        // Obtener reporte de operación con datos relevantes
+        Route::get('/my-operation-report', [DatosRelevantesLeaseOn::class, 'getMyOperationReport']);
+
+        // Obtener resumen estadístico de operación
+        Route::get('/my-operation-summary', [DatosRelevantesLeaseOn::class, 'getMyOperationSummary']);
+
+        // Obtener productividad diaria
+        Route::get('/my-daily-productivity', [DatosRelevantesLeaseOn::class, 'getMyDailyProductivity']);
+
+        // Comparar mis vehículos
+        Route::get('/compare-my-vehicles', [DatosRelevantesLeaseOn::class, 'compareMyVehicles']);
     });
     /*
     |--------------------------------------------------------------------------
