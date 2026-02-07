@@ -425,23 +425,23 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/state-actives-driver', [PaymentMethodController::class, 'paymentMethodsActives']);
         });
     });
-    Route::middleware(['auth:sanctum', 'inversionista'])->group(function () {
+    /*  Route::middleware(['auth:sanctum', 'inversionista'])->group(function () { */
 
-        // Dashboard y datos principales del inversionista
-        Route::get('/dashboard', [InvestorDashboardController::class, 'index']);
-        Route::get('/my-investments', [InvestorDashboardController::class, 'myInvestments']);
-        Route::get('/my-businesses', [InvestorDashboardController::class, 'myBusinesses']);
-        Route::get('/business/{businessId}/details', [InvestorDashboardController::class, 'businessDetails']);
-        Route::get('/business/{businessId}/financial-statement', [InvestorDashboardController::class, 'businessFinancialStatement']);
-        Route::get('/business/{businessId}/transactions', [InvestorDashboardController::class, 'businessTransactions']);
-        // Vehículos financieros para inversionista
-        Route::get('/vehicles-financial/business', [VehicleFinancialController::class, 'getVehiclesFinancialStatementByBusiness']);
-        Route::get('/vehicles-financial/vehicle', [VehicleFinancialController::class, 'getVehicleFinancialStatement']);
-        Route::get('/vehicles-financial/vehicle/{vehicleId}/transactions', [VehicleFinancialController::class, 'getVehicleTransactions']);
-        Route::get('/vehicles-financial/performance-summary', [VehicleFinancialController::class, 'getVehiclesPerformanceSummary']);
-        Route::get('/vehicles-financial/export/excel', [VehicleFinancialController::class, 'exportToExcel']);
-        Route::get('/vehicles-financial/export/pdf', [VehicleFinancialController::class, 'exportToPDF']);
-    });
+    // Dashboard y datos principales del inversionista
+    Route::get('/dashboard', [InvestorDashboardController::class, 'index']);
+    Route::get('/my-investments', [InvestorDashboardController::class, 'myInvestments']);
+    Route::get('/my-businesses', [InvestorDashboardController::class, 'myBusinesses']);
+    Route::get('/business/{businessId}/details', [InvestorDashboardController::class, 'businessDetails']);
+    Route::get('/business/{businessId}/financial-statement', [InvestorDashboardController::class, 'businessFinancialStatement']);
+    Route::get('/business/{businessId}/transactions', [InvestorDashboardController::class, 'businessTransactions']);
+    // Vehículos financieros para inversionista
+    Route::get('/vehicles-financial/business', [VehicleFinancialController::class, 'getVehiclesFinancialStatementByBusiness']);
+    Route::get('/vehicles-financial/vehicle', [VehicleFinancialController::class, 'getVehicleFinancialStatement']);
+    Route::get('/vehicles-financial/vehicle/{vehicleId}/transactions', [VehicleFinancialController::class, 'getVehicleTransactions']);
+    Route::get('/vehicles-financial/performance-summary', [VehicleFinancialController::class, 'getVehiclesPerformanceSummary']);
+    Route::get('/vehicles-financial/export/excel', [VehicleFinancialController::class, 'exportToExcel']);
+    Route::get('/vehicles-financial/export/pdf', [VehicleFinancialController::class, 'exportToPDF']);
+    /*  }); */
     // Rutas protegidas con middleware personalizado
     Route::middleware(['auth:sanctum', 'inversionista-lease-on'])->prefix('investor-lease-on')->group(function () {
         // Obtener negocios donde ha invertido
