@@ -15,14 +15,14 @@ use Carbon\Carbon;
 class InvestorDashboardLeaseOn extends Controller
 {
     /**
-     * Dashboard principal del inversionista - Resumen general
+     * Dashboard principal del INVERSIONISTA LEASE ON - Resumen general
      */
     public function index()
     {
         try {
             $user = Auth::user();
 
-            if (!$user->hasRole('inversionista')) {
+            if (!$user->hasRole('INVERSIONISTA LEASE ON')) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No tienes permisos para acceder a este dashboard'
@@ -253,7 +253,7 @@ class InvestorDashboardLeaseOn extends Controller
         try {
             $user = Auth::user();
 
-            if (!$user->hasRole('inversionista')) {
+            if (!$user->hasRole('INVERSIONISTA LEASE ON')) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No tienes permisos para acceder a esta información'
@@ -361,7 +361,7 @@ class InvestorDashboardLeaseOn extends Controller
         try {
             $user = Auth::user();
 
-            if (!$user->hasRole('inversionista')) {
+            if (!$user->hasRole('INVERSIONISTA LEASE ON')) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No tienes permisos para acceder a esta información'
@@ -514,7 +514,7 @@ class InvestorDashboardLeaseOn extends Controller
         try {
             $user = Auth::user();
 
-            if (!$user->hasRole('inversionista')) {
+            if (!$user->hasRole('INVERSIONISTA LEASE ON')) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No tienes permisos para acceder a esta información'
@@ -639,7 +639,7 @@ class InvestorDashboardLeaseOn extends Controller
         try {
             $user = Auth::user();
 
-            if (!$user->hasRole('inversionista')) {
+            if (!$user->hasRole('INVERSIONISTA LEASE ON')) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No tienes permisos para acceder a esta información'
