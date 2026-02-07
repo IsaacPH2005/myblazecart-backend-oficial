@@ -13,10 +13,59 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 class EstadosDeResultadoInvestorLeaseOn extends Controller
 {
+    /**
+     * Obtener URL completa de un archivo
+     */
+    private function getUrlCompleta($rutaArchivo)
+    {
+        if (!$rutaArchivo) {
+            return null;
+        }
+
+        if (filter_var($rutaArchivo, FILTER_VALIDATE_URL)) {
+            return $rutaArchivo;
+        }
+
+        if (Storage::disk('public')->exists($rutaArchivo)) {
+            return asset('storage/' . $rutaArchivo);
+        }
+
+        if (file_exists(public_path($rutaArchivo))) {
+            return asset($rutaArchivo);
+        }
+
+        return url($rutaArchivo);
+    }
+
+    /**
+     * Verificar si un archivo es una imagen
+     */
+    private function esImagen($tipoArchivo)
+    {
+        $tiposImagen = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+        return in_array(strtolower($tipoArchivo), $tiposImagen);
+    }
+
+    /**
+     * Formatear el tamaño de un archivo
+     */
+    private function formatearTamanoArchivo($bytes)
+    {
+        if (!$bytes || $bytes == 0) {
+            return '0 B';
+        }
+
+        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        $factor = floor((strlen($bytes) - 1) / 3);
+
+        return sprintf("%.2f %s", $bytes / pow(1024, $factor), $units[$factor]);
+    }
+
     /**
      * Obtener negocios donde el inversionista ha invertido
      */
@@ -202,7 +251,7 @@ class EstadosDeResultadoInvestorLeaseOn extends Controller
     }
 
     /**
-     * Obtener estado de resultados del inversionista
+     * Obtener estado de resultados del inversionista CON TRANSACCIONES DETALLADAS
      */
     public function getFinancialStatementByDateRange(Request $request): JsonResponse
     {
@@ -257,7 +306,6 @@ class EstadosDeResultadoInvestorLeaseOn extends Controller
 
             $negocio = Business::findOrFail($negocioId);
 
-            // Verificar que el negocio esté activo
             if (!$negocio->estado) {
                 return response()->json([
                     'status' => 'error',
@@ -278,7 +326,6 @@ class EstadosDeResultadoInvestorLeaseOn extends Controller
                     ], 400);
                 }
 
-                // Verificar que el vehículo esté activo
                 if (!$vehicle->is_active) {
                     return response()->json([
                         'status' => 'error',
@@ -286,7 +333,6 @@ class EstadosDeResultadoInvestorLeaseOn extends Controller
                     ], 400);
                 }
 
-                // Verificar que el usuario tiene inversión activa en este vehículo
                 $tieneInversionEnVehiculo = Investment::where('user_id', $user->id)
                     ->where('business_id', $negocioId)
                     ->where('vehicle_id', $vehicleId)
@@ -322,9 +368,10 @@ class EstadosDeResultadoInvestorLeaseOn extends Controller
 
             // Calcular rentabilidad
             $totalInvertido = $inversiones->sum('monto_inversion');
-            $rentabilidadPorcentaje = $totalInvertido > 0 ? ($margenBruto / $totalInvertido) * 100 : 0;
+            $rentabilidadPorcentaje = $totalIngresosBrutos > 0 ? ($margenBruto / $totalIngresosBrutos) * 100 : 0;
+            $roi = $totalInvertido > 0 ? ($margenBruto / $totalInvertido) * 100 : 0;
 
-            // ✅ RESUMEN POR ESTADO
+            // ✅ RESUMEN POR ESTADO CON TRANSACCIONES DETALLADAS
             $queryTransaccionesEstado = FinancialTransactions::where('negocio_id', $negocioId)
                 ->where(function ($query) {
                     $query->where('tipo_de_transaccion', 'Egreso')
@@ -369,6 +416,7 @@ class EstadosDeResultadoInvestorLeaseOn extends Controller
                         'total_transacciones_ingresos' => 0,
                         'total_transacciones_egresos' => 0,
                         'balance_estado' => 0,
+                        'transacciones_detalladas' => []
                     ];
                 }
 
@@ -382,6 +430,168 @@ class EstadosDeResultadoInvestorLeaseOn extends Controller
 
                 $estadosFinancieros[$estadoId]['balance_estado'] = $estadosFinancieros[$estadoId]['ingresos'] - $estadosFinancieros[$estadoId]['egresos'];
             }
+
+            // ✅ OBTENER TRANSACCIONES DETALLADAS POR CADA ESTADO
+            foreach ($estadosFinancieros as $estadoId => &$estadoData) {
+                $queryDetalles = FinancialTransactions::where('negocio_id', $negocioId)
+                    ->where('estado_de_transaccion_id', $estadoId)
+                    ->where(function ($query) {
+                        $query->where('tipo_de_transaccion', 'Egreso')
+                            ->orWhere(function ($query) {
+                                $query->where('tipo_de_transaccion', 'Ingreso')
+                                    ->whereNull('caja_operativa_id');
+                            });
+                    })
+                    ->whereBetween('fecha', [$fechaInicial, $fechaFinal]);
+
+                if ($esFiltradoPorVehiculo) {
+                    $queryDetalles->where('vehicle_id', $vehicleId);
+                }
+
+                $transaccionesDetalle = $queryDetalles
+                    ->with([
+                        'negocio:id,nombre,descripcion',
+                        'metodo' => function ($query) {
+                            $query->select('id', 'nombre');
+                        },
+                        'categoria' => function ($query) {
+                            $query->select('id', 'nombre', 'codigo', 'clasificacion', 'subcategoria', 'agrupacion', 'descripcion');
+                        },
+                        'user.generalData:user_id,nombre,apellido,documento_identidad,celular',
+                        'vehicle:id,codigo_unico,numero_placa,marca,modelo,año,tipo_vehiculo,tipo_propiedad',
+                        'estadoDeTransaccion' => function ($query) {
+                            $query->select('id', 'nombre', 'descripcion');
+                        },
+                        'archivos' => function ($query) {
+                            $query->select('id', 'financial_transaction_id', 'ruta', 'nombre_original', 'mime_type', 'estado');
+                        }
+                    ])
+                    ->orderBy('fecha', 'desc')
+                    ->orderBy('created_at', 'desc')
+                    ->get();
+
+                $estadoData['transacciones_detalladas'] = $transaccionesDetalle->map(function ($trans) {
+                    $archivosData = [];
+                    $totalArchivos = 0;
+                    $totalImagenes = 0;
+                    $tieneImagenes = false;
+
+                    if ($trans->archivos && $trans->archivos->count() > 0) {
+                        $totalArchivos = $trans->archivos->count();
+
+                        foreach ($trans->archivos as $archivo) {
+                            $esImagen = $this->esImagen($archivo->mime_type);
+
+                            if ($esImagen) {
+                                $totalImagenes++;
+                                $tieneImagenes = true;
+                            }
+
+                            $archivoSize = 0;
+                            if ($archivo->ruta && Storage::disk('public')->exists($archivo->ruta)) {
+                                $archivoSize = Storage::disk('public')->size($archivo->ruta);
+                            }
+
+                            $archivosData[] = [
+                                'id' => $archivo->id,
+                                'nombre_archivo' => $archivo->nombre_original,
+                                'tipo_archivo' => $archivo->mime_type,
+                                'tamano_archivo' => $archivoSize,
+                                'tamano_formateado' => $this->formatearTamanoArchivo($archivoSize),
+                                'ruta_archivo' => $archivo->ruta,
+                                'url_completa' => $this->getUrlCompleta($archivo->ruta),
+                                'es_imagen' => $esImagen,
+                                'estado' => $archivo->estado ?? 'activo',
+                                'created_at' => $archivo->created_at ? $archivo->created_at->format('Y-m-d H:i:s') : null,
+                            ];
+                        }
+                    }
+
+                    return [
+                        'id' => $trans->id,
+                        'numero_transaccion' => $trans->numero_transaccion,
+                        'tipo_de_transaccion' => $trans->tipo_de_transaccion,
+                        'fecha' => $trans->fecha ? $trans->fecha->format('Y-m-d') : null,
+                        'fecha_formateada' => $trans->fecha ? $trans->fecha->format('d/m/Y') : null,
+                        'item' => $trans->item,
+                        'cantidad' => floatval($trans->cantidad ?? 0),
+                        'importe_total' => floatval($trans->importe_total ?? 0),
+                        'importe_total_formateado' => number_format($trans->importe_total ?? 0, 2, '.', ','),
+                        'cliente_proveedor' => $trans->cliente_proveedor,
+                        'observaciones' => $trans->observaciones,
+                        'punto_de_partida' => $trans->punto_de_partida,
+                        'destino' => $trans->destino,
+                        'millas' => floatval($trans->millas ?? 0),
+                        'millas_formateadas' => number_format($trans->millas ?? 0, 2),
+
+                        'metodo_pago' => $trans->metodo ? [
+                            'id' => $trans->metodo->id,
+                            'nombre' => $trans->metodo->nombre,
+                        ] : null,
+
+                        'categoria' => $trans->categoria ? [
+                            'id' => $trans->categoria->id,
+                            'nombre' => $trans->categoria->nombre,
+                            'codigo' => $trans->categoria->codigo ?? '',
+                            'clasificacion' => $trans->categoria->clasificacion ?? '',
+                        ] : null,
+
+                        'usuario' => $trans->user && $trans->user->generalData ? [
+                            'id' => $trans->user->id,
+                            'nombre_completo' => trim($trans->user->generalData->nombre . ' ' . $trans->user->generalData->apellido),
+                            'celular' => $trans->user->generalData->celular,
+                        ] : null,
+
+                        'vehiculo' => $trans->vehicle ? [
+                            'id' => $trans->vehicle->id,
+                            'codigo_unico' => $trans->vehicle->codigo_unico,
+                            'numero_placa' => $trans->vehicle->numero_placa,
+                            'nombre_completo' => trim("{$trans->vehicle->codigo_unico} - {$trans->vehicle->numero_placa} ({$trans->vehicle->marca} {$trans->vehicle->modelo})"),
+                        ] : null,
+
+                        'total_archivos' => $totalArchivos,
+                        'total_imagenes' => $totalImagenes,
+                        'tiene_imagenes' => $tieneImagenes,
+                        'archivos' => $archivosData,
+
+                        'created_at' => $trans->created_at ? $trans->created_at->format('Y-m-d H:i:s') : null,
+                    ];
+                })->toArray();
+            }
+
+            // ✅ DISTRIBUCIÓN POR ESTADOS
+            $queryDistribucion = FinancialTransactions::where('negocio_id', $negocioId)
+                ->where(function ($query) {
+                    $query->where('tipo_de_transaccion', 'Egreso')
+                        ->orWhere(function ($query) {
+                            $query->where('tipo_de_transaccion', 'Ingreso')
+                                ->whereNull('caja_operativa_id');
+                        });
+                })
+                ->whereBetween('fecha', [$fechaInicial, $fechaFinal]);
+
+            if ($esFiltradoPorVehiculo) {
+                $queryDistribucion->where('vehicle_id', $vehicleId);
+            }
+
+            $distribucionEstadosPorImporte = $queryDistribucion
+                ->join('transaction_states', 'financial_transactions.estado_de_transaccion_id', '=', 'transaction_states.id')
+                ->select(
+                    'transaction_states.id as estado_id',
+                    'transaction_states.nombre as estado_nombre',
+                    DB::raw('COUNT(*) as cantidad'),
+                    DB::raw('SUM(importe_total) as total_importe')
+                )
+                ->groupBy('transaction_states.id', 'transaction_states.nombre')
+                ->get()
+                ->map(function ($item) {
+                    return [
+                        'estado_id' => $item->estado_id,
+                        'estado_nombre' => strtoupper($item->estado_nombre),
+                        'cantidad' => $item->cantidad,
+                        'total_importe' => floatval($item->total_importe),
+                    ];
+                });
 
             // ✅ RESUMEN POR CATEGORÍA
             $queryCategoria = FinancialTransactions::where('negocio_id', $negocioId)
@@ -471,10 +681,17 @@ class EstadosDeResultadoInvestorLeaseOn extends Controller
                     'margen_bruto_raw' => floatval($margenBruto),
                     'rentabilidad_porcentaje' => number_format($rentabilidadPorcentaje, 2, '.', ','),
                     'rentabilidad_porcentaje_raw' => floatval($rentabilidadPorcentaje),
-                    'roi' => $totalInvertido > 0 ? number_format(($margenBruto / $totalInvertido) * 100, 2, '.', ',') : '0.00',
+                    'roi' => number_format($roi, 2, '.', ','),
                 ],
                 'detalle_por_estado' => array_values($estadosFinancieros),
+                'distribucion_estados' => [
+                    'por_importe' => $distribucionEstadosPorImporte->sortByDesc('total_importe')->values()->toArray()
+                ],
                 'resumen_por_categoria' => $resumenPorCategoria->values()->all(),
+                'estadisticas_adicionales' => [
+                    'total_transacciones_ingresos' => $transaccionesPorEstado->filter(fn($t) => $t->tipo_de_transaccion === 'Ingreso')->sum('total_transacciones'),
+                    'total_transacciones_egresos' => $transaccionesPorEstado->filter(fn($t) => $t->tipo_de_transaccion === 'Egreso')->sum('total_transacciones'),
+                ],
             ];
 
             if ($esFiltradoPorVehiculo && $vehicle) {
