@@ -22,7 +22,6 @@ class DatosRelevantesLeaseOn extends Controller
         try {
             $userId = Auth::id();
 
-            // Obtener negocios únicos donde el inversionista tiene vehículos
             $negocios = Investment::with('vehicle.negocio')
                 ->where('user_id', $userId)
                 ->where('estado', 'activo')
@@ -68,7 +67,6 @@ class DatosRelevantesLeaseOn extends Controller
 
             $userId = Auth::id();
 
-            // Obtener vehículos del negocio donde el usuario tiene inversión
             $vehiculos = Investment::with(['vehicle' => function ($query) {
                 $query->where('estado', true)
                     ->orderBy('marca')
@@ -120,7 +118,7 @@ class DatosRelevantesLeaseOn extends Controller
 
     /**
      * Obtener datos relevantes de operación del inversionista
-     * Filtrable por negocio y/o vehículo
+     * SOLO MUESTRA INGRESOS BRUTOS (sin egresos, margen, rentabilidad)
      */
     public function getMyOperationReport(Request $request)
     {
@@ -202,26 +200,13 @@ class DatosRelevantesLeaseOn extends Controller
                 ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
                 ->whereIn('vehicle_id', $misVehiculosIds);
 
-            // Calcular días transcurridos
+            // ✅ Calcular días transcurridos (ENTERO)
             $diasTranscurridos = $fechaInicial->diffInDays($fechaFinal) + 1;
 
             // INGRESOS BRUTOS
             $ingresosBrutos = $query->clone()
                 ->where('tipo_de_transaccion', 'ingreso')
                 ->sum('importe_total');
-
-            // EGRESOS BRUTOS
-            $egresosBrutos = $query->clone()
-                ->where('tipo_de_transaccion', 'egreso')
-                ->sum('importe_total');
-
-            // MARGEN BRUTO
-            $margenBruto = $ingresosBrutos - $egresosBrutos;
-
-            // RENTABILIDAD %
-            $rentabilidadPorcentaje = $ingresosBrutos > 0
-                ? round(($margenBruto / $ingresosBrutos) * 100, 2)
-                : 0;
 
             // MILLAS RECORRIDAS
             $millasRecorridas = $query->clone()
@@ -263,15 +248,10 @@ class DatosRelevantesLeaseOn extends Controller
                 ->where('active', true)
                 ->sum('monto_inversion');
 
-            // ROI DEL INVERSIONISTA
-            $miROI = $miInversionTotal > 0
-                ? round(($margenBruto / $miInversionTotal) * 100, 2)
-                : 0;
-
             // CANTIDAD DE VEHÍCULOS CON INVERSIÓN
             $cantidadVehiculosInvertidos = count($misVehiculosIds);
 
-            // Preparar datos de respuesta
+            // ✅ Preparar datos de respuesta (SIN EGRESOS, MARGEN, ROI, RENTABILIDAD)
             $datosOperacion = [
                 'filtros_aplicados' => [
                     'negocio' => $negocioInfo,
@@ -281,41 +261,22 @@ class DatosRelevantesLeaseOn extends Controller
                     'monto_total' => number_format($miInversionTotal, 2, '.', ','),
                     'monto_total_raw' => $miInversionTotal,
                     'cantidad_vehiculos' => $cantidadVehiculosInvertidos,
-                    'roi_porcentaje' => number_format($miROI, 2, '.', ','),
-                    'roi_porcentaje_raw' => $miROI,
-                    'ganancia_estimada' => number_format($margenBruto, 2, '.', ','),
-                    'ganancia_estimada_raw' => $margenBruto,
                 ],
                 'periodo' => [
                     'fecha_inicial' => $fechaInicial->format('d/m/Y'),
                     'fecha_final' => $fechaFinal->format('d/m/Y'),
-                    'dias_transcurridos' => $diasTranscurridos
+                    'dias_transcurridos' => $diasTranscurridos // ✅ ENTERO
                 ],
                 'datos_relevantes' => [
                     [
                         'ranking' => 1,
                         'item' => 'DÍAS TRANSCURRIDOS',
-                        'total' => $diasTranscurridos,
+                        'total' => $diasTranscurridos, // ✅ ENTERO
                         'unidad' => 'días',
                         'icono' => '📅'
                     ],
                     [
                         'ranking' => 2,
-                        'item' => 'MI INVERSIÓN TOTAL',
-                        'total' => number_format($miInversionTotal, 2, '.', ','),
-                        'unidad' => 'USD',
-                        'valor_numerico' => $miInversionTotal,
-                        'icono' => '💰'
-                    ],
-                    [
-                        'ranking' => 3,
-                        'item' => 'VEHÍCULOS CON INVERSIÓN',
-                        'total' => $cantidadVehiculosInvertidos,
-                        'unidad' => 'vehículos',
-                        'icono' => '🚗'
-                    ],
-                    [
-                        'ranking' => 4,
                         'item' => 'INGRESOS BRUTOS',
                         'total' => number_format($ingresosBrutos, 2, '.', ','),
                         'unidad' => 'USD',
@@ -323,39 +284,7 @@ class DatosRelevantesLeaseOn extends Controller
                         'icono' => '📈'
                     ],
                     [
-                        'ranking' => 5,
-                        'item' => 'EGRESOS BRUTOS',
-                        'total' => number_format($egresosBrutos, 2, '.', ','),
-                        'unidad' => 'USD',
-                        'valor_numerico' => $egresosBrutos,
-                        'icono' => '💸'
-                    ],
-                    [
-                        'ranking' => 6,
-                        'item' => 'MARGEN BRUTO',
-                        'total' => number_format($margenBruto, 2, '.', ','),
-                        'unidad' => 'USD',
-                        'valor_numerico' => $margenBruto,
-                        'icono' => '📊'
-                    ],
-                    [
-                        'ranking' => 7,
-                        'item' => 'MI ROI',
-                        'total' => number_format($miROI, 2, '.', ','),
-                        'unidad' => '%',
-                        'valor_numerico' => $miROI,
-                        'icono' => '🎯'
-                    ],
-                    [
-                        'ranking' => 8,
-                        'item' => 'RENTABILIDAD DEL NEGOCIO',
-                        'total' => number_format($rentabilidadPorcentaje, 2, '.', ','),
-                        'unidad' => '%',
-                        'valor_numerico' => $rentabilidadPorcentaje,
-                        'icono' => '💹'
-                    ],
-                    [
-                        'ranking' => 9,
+                        'ranking' => 3,
                         'item' => 'MILLAS RECORRIDAS',
                         'total' => number_format($millasRecorridas, 0, '.', ','),
                         'unidad' => 'millas',
@@ -363,22 +292,22 @@ class DatosRelevantesLeaseOn extends Controller
                         'icono' => '🛣️'
                     ],
                     [
-                        'ranking' => 10,
+                        'ranking' => 4,
                         'item' => 'PRODUCTIVIDAD POR DÍA',
                         'total' => number_format($productividadPorDia, 2, '.', ','),
                         'unidad' => '$/día',
                         'valor_numerico' => $productividadPorDia,
-                        'icono' => '📅'
+                        'icono' => '📊'
                     ],
                     [
-                        'ranking' => 11,
+                        'ranking' => 5,
                         'item' => 'NÚMERO DE CARGAS',
                         'total' => $numeroCargas,
                         'unidad' => 'cargas',
                         'icono' => '📦'
                     ],
                     [
-                        'ranking' => 12,
+                        'ranking' => 6,
                         'item' => 'CARGA MEJOR PAGADA',
                         'total' => $cargaMejorPagada
                             ? number_format($cargaMejorPagada->importe_total, 2, '.', ',')
@@ -394,7 +323,7 @@ class DatosRelevantesLeaseOn extends Controller
                         'icono' => '🏆'
                     ],
                     [
-                        'ranking' => 13,
+                        'ranking' => 7,
                         'item' => 'PAGO POR MILLA',
                         'total' => number_format($estimacionPagoPorMilla, 2, '.', ','),
                         'unidad' => '$/milla',
@@ -402,7 +331,7 @@ class DatosRelevantesLeaseOn extends Controller
                         'icono' => '🎯'
                     ],
                     [
-                        'ranking' => 14,
+                        'ranking' => 8,
                         'item' => 'PROMEDIO POR CARGA',
                         'total' => number_format($promedioPorCarga, 2, '.', ','),
                         'unidad' => '$/carga',
@@ -442,7 +371,6 @@ class DatosRelevantesLeaseOn extends Controller
             $fechaInicial = Carbon::parse($request->fecha_inicial)->startOfDay();
             $fechaFinal = Carbon::parse($request->fecha_final)->endOfDay();
 
-            // Obtener vehículos del inversionista
             $vehiculosQuery = Investment::where('user_id', $userId)
                 ->where('estado', 'activo')
                 ->where('active', true);
@@ -466,12 +394,10 @@ class DatosRelevantesLeaseOn extends Controller
                 ], 404);
             }
 
-            // Query base
             $query = FinancialTransactions::query()
                 ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
                 ->whereIn('vehicle_id', $misVehiculosIds);
 
-            // Totales
             $totalIngresos = $query->clone()
                 ->where('tipo_de_transaccion', 'ingreso')
                 ->sum('importe_total');
@@ -498,7 +424,6 @@ class DatosRelevantesLeaseOn extends Controller
                 ? round($totalEgresos / $numeroEgresos, 2)
                 : 0;
 
-            // Top categorías de gastos
             $topCategoriasGastos = $query->clone()
                 ->where('tipo_de_transaccion', 'egreso')
                 ->with('categoria')
@@ -516,7 +441,6 @@ class DatosRelevantesLeaseOn extends Controller
                     ];
                 });
 
-            // Top clientes
             $topClientes = $query->clone()
                 ->where('tipo_de_transaccion', 'ingreso')
                 ->whereNull('caja_operativa_id')
@@ -544,7 +468,6 @@ class DatosRelevantesLeaseOn extends Controller
                     ];
                 });
 
-            // Distribución por tipo
             $distribucionTipos = [
                 [
                     'tipo' => 'Ingresos',
@@ -618,7 +541,6 @@ class DatosRelevantesLeaseOn extends Controller
             $fechaInicial = Carbon::parse($request->fecha_inicial);
             $fechaFinal = Carbon::parse($request->fecha_final);
 
-            // Obtener vehículos del inversionista
             $vehiculosQuery = Investment::where('user_id', $userId)
                 ->where('estado', 'activo')
                 ->where('active', true);
@@ -642,13 +564,11 @@ class DatosRelevantesLeaseOn extends Controller
                 ], 404);
             }
 
-            // Query base
             $query = FinancialTransactions::query()
                 ->whereBetween('fecha', [$fechaInicial, $fechaFinal])
                 ->whereIn('vehicle_id', $misVehiculosIds)
                 ->where('tipo_de_transaccion', 'ingreso');
 
-            // Agrupar por día
             $productividadDiaria = $query
                 ->select(
                     DB::raw('DATE(fecha) as dia'),
@@ -686,7 +606,6 @@ class DatosRelevantesLeaseOn extends Controller
                     ];
                 });
 
-            // Estadísticas
             $valoresNumericos = $productividadDiaria->pluck('valores_numericos.productividad');
             $promedioProductividad = $valoresNumericos->avg();
             $maxProductividad = $valoresNumericos->max();
@@ -746,7 +665,6 @@ class DatosRelevantesLeaseOn extends Controller
             $fechaInicial = Carbon::parse($request->fecha_inicial)->startOfDay();
             $fechaFinal = Carbon::parse($request->fecha_final)->endOfDay();
 
-            // Obtener inversiones del usuario
             $inversionesQuery = Investment::with('vehicle.negocio')
                 ->where('user_id', $userId)
                 ->where('estado', 'activo')
@@ -794,9 +712,6 @@ class DatosRelevantesLeaseOn extends Controller
                     ->count();
 
                 $margen = $ingresos - $egresos;
-                $miROI = $inversion->monto_inversion > 0
-                    ? round(($margen / $inversion->monto_inversion) * 100, 2)
-                    : 0;
 
                 $comparativa[] = [
                     'vehiculo_id' => $vehiculo->id,
@@ -816,8 +731,6 @@ class DatosRelevantesLeaseOn extends Controller
                         'monto' => number_format($inversion->monto_inversion, 2, '.', ','),
                         'monto_raw' => $inversion->monto_inversion,
                         'descripcion' => $inversion->descripcion,
-                        'roi_porcentaje' => number_format($miROI, 2, '.', ','),
-                        'roi_porcentaje_raw' => $miROI,
                     ],
                     'metricas' => [
                         'ingresos' => number_format($ingresos, 2, '.', ','),
@@ -835,16 +748,14 @@ class DatosRelevantesLeaseOn extends Controller
                             'ingresos' => round($ingresos, 2),
                             'egresos' => round($egresos, 2),
                             'margen' => round($margen, 2),
-                            'roi' => $miROI,
                         ]
                     ]
                 ];
             }
 
-            // Ordenar por ROI descendente
             usort($comparativa, function ($a, $b) {
-                return $b['metricas']['valores_numericos']['roi'] <=>
-                    $a['metricas']['valores_numericos']['roi'];
+                return $b['metricas']['valores_numericos']['ingresos'] <=>
+                    $a['metricas']['valores_numericos']['ingresos'];
             });
 
             return response()->json([
