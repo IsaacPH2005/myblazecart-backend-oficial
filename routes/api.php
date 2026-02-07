@@ -11,6 +11,7 @@ use App\Http\Controllers\api\investments\VehicleFinancialController;
 use App\Http\Controllers\api\InvestorLeaseOn\EgresosPorCategoriaInvestorLeaseOn;
 use App\Http\Controllers\api\InvestorLeaseOn\EstadosDeResultadoInvestorLeaseOn;
 use App\Http\Controllers\api\InvestorLeaseOn\IngresosPorCategoriaInvestorLeaseOn;
+use App\Http\Controllers\api\InvestorLeaseOn\VehiculosDelNegocioInvestorLeaseOn;
 use App\Http\Controllers\api\MovementBox\MovementBoxController;
 use App\Http\Controllers\api\OperatingBox\OperatingBoxController;
 use App\Http\Controllers\api\OperatingBox\OperatingBoxHistoryController;
@@ -464,6 +465,22 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Exportar ingresos por categoría a Excel
         Route::post('/incomes-by-category/export-excel', [IngresosPorCategoriaInvestorLeaseOn::class, 'exportIncomesByCategoryToExcel']);
+
+
+
+
+        // ========================================
+        // RUTAS DE VEHÍCULOS DEL INVERSIONISTA
+        // ========================================
+
+        // Obtener vehículos con inversión del usuario en un negocio
+        Route::get('/my-vehicles-by-business', [VehiculosDelNegocioInvestorLeaseOn::class, 'getMyVehiclesByBusiness']);
+
+        // Obtener estado financiero de vehículos del inversionista
+        Route::get('/my-vehicles-financial-statement', [VehiculosDelNegocioInvestorLeaseOn::class, 'getMyVehiclesFinancialStatement']);
+
+        // Obtener estado financiero detallado de un vehículo específico
+        Route::get('/my-vehicle-detailed-financial-statement', [VehiculosDelNegocioInvestorLeaseOn::class, 'getMyVehicleDetailedFinancialStatement']);
     });
     /*
     |--------------------------------------------------------------------------
