@@ -8,6 +8,7 @@ use App\Http\Controllers\api\Driver\DriverDocumentController;
 use App\Http\Controllers\api\investments\InvestmentController;
 use App\Http\Controllers\api\investments\InvestorDashboardController;
 use App\Http\Controllers\api\investments\VehicleFinancialController;
+use App\Http\Controllers\api\InvestorLeaseOn\EgresosPorCategoriaInvestorLeaseOn;
 use App\Http\Controllers\api\InvestorLeaseOn\EstadosDeResultadoInvestorLeaseOn;
 use App\Http\Controllers\api\MovementBox\MovementBoxController;
 use App\Http\Controllers\api\OperatingBox\OperatingBoxController;
@@ -450,6 +451,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Obtener resumen de inversiones
         Route::get('/my-investments-summary', [EstadosDeResultadoInvestorLeaseOn::class, 'getMyInvestmentsSummary']);
+
+
+
+        Route::get('/expenses-by-category', [EgresosPorCategoriaInvestorLeaseOn::class, 'getExpensesByCategoryByBusiness']);
+        Route::get('/expenses-excel', [EgresosPorCategoriaInvestorLeaseOn::class, 'exportExpensesToExcel']);
     });
     /*
     |--------------------------------------------------------------------------
